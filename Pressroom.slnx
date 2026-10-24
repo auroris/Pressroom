@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pressroom.Contracts/Pressroom.Contracts.csproj" />
+    <Project Path="src/Pressroom.Client/Pressroom.Client.csproj" />
+    <Project Path="src/Pressroom.Rendering/Pressroom.Rendering.csproj" />
+    <Project Path="src/Pressroom.Server/Pressroom.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pressroom.Contracts.Tests/Pressroom.Contracts.Tests.csproj" />
+    <Project Path="tests/Pressroom.Rendering.Tests/Pressroom.Rendering.Tests.csproj" />
+    <Project Path="tests/Pressroom.Server.Tests/Pressroom.Server.Tests.csproj" />
+  </Folder>
+</Solution>

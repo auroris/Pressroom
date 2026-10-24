@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+  <meta charset="utf-8">
+  <title>Orders / Ordres — 4 Wing</title>
+  <style>
+    @page { size: Letter portrait; }
+    :root { color: #182d3f; font-family: 'Noto Sans', sans-serif; font-size: 10pt; }
+    body { margin: 0; }
+    h1 { font-size: 25pt; margin: 5mm 0 2mm; }
+    h2 { font-size: 14pt; margin: 7mm 0 3mm; }
+    p { line-height: 1.55; }
+    .eyebrow { color: #526878; text-transform: uppercase; letter-spacing: .12em; font-size: 8pt; }
+    .rule { border-top: 3px solid #225d76; padding-top: 4mm; }
+    .note { background: #eef5f6; border-left: 3px solid #3f7d8e; padding: 4mm; }
+    .mark { float: right; width: 14mm; height: 14mm; }
+    table { border-collapse: collapse; width: 100%; font-size: 9pt; }
+    th { background: #225d76; color: white; text-align: left; padding: 3mm; }
+    td { padding: 3mm; border-bottom: 1px solid #cfdae0; }
+    tr { break-inside: avoid; }
+    .number { text-align: right; white-space: nowrap; }
+    .second-language { break-before: page; }
+    @media screen { body { background: #faf7ef; } }
+    @media print { body { background: white; } }
+  </style>
+</head>
+<body>
+  <section aria-labelledby="english-title">
+    <svg class="mark" viewBox="0 0 48 48" role="img" aria-label="Sample document mark"><rect width="48" height="48" rx="8" fill="#225d76"/><path d="M12 13h24v4H12zm0 9h24v4H12zm0 9h16v4H12z" fill="white"/></svg>
+    <p class="eyebrow">4 Wing · Demonstration document</p>
+    <h1 id="english-title">Orders</h1>
+    <p class="rule"><strong>Unit:</strong> Sample support team<br><strong>Period:</strong> October 2026<br><strong>Reference:</strong> PR-0001</p>
+    <h2>Requested items</h2>
+    <table>
+      <thead><tr><th scope="col">Description</th><th scope="col" class="number">Quantity</th><th scope="col">Destination</th></tr></thead>
+      <tbody>
+        <tr><td>Letter paper, recycled</td><td class="number">12</td><td>Operations office</td></tr>
+        <tr><td>Document folders, blue</td><td class="number">48</td><td>Administration</td></tr>
+        <tr><td>Reusable labels</td><td class="number">24</td><td>Reception</td></tr>
+      </tbody>
+    </table>
+    <h2>Instructions</h2>
+    <p>Deliver during office hours. Keep the order reference with the shipment. This sample contains no live operational information.</p>
+    <p class="note"><strong>Rendering check:</strong> This document uses the packaged Noto Sans font in regular, <strong>bold</strong>, <em>italic</em>, and <strong><em>bold italic</em></strong>. Its second page checks French text and an explicit page break.</p>
+  </section>
+  <section class="second-language" lang="fr-CA" aria-labelledby="french-title">
+    <p class="eyebrow">4e Escadre · Document de démonstration</p>
+    <h1 id="french-title">Ordres</h1>
+    <p class="rule"><strong>Unité :</strong> Équipe de soutien fictive<br><strong>Période :</strong> Octobre 2026<br><strong>Référence :</strong> PR-0001</p>
+    <h2>Articles demandés</h2>
+    <table>
+      <thead><tr><th scope="col">Description</th><th scope="col" class="number">Quantité</th><th scope="col">Destination</th></tr></thead>
+      <tbody>
+        <tr><td>Papier recyclé, format lettre</td><td class="number">12</td><td>Bureau des opérations</td></tr>
+        <tr><td>Chemises bleues</td><td class="number">48</td><td>Administration</td></tr>
+        <tr><td>Étiquettes réutilisables</td><td class="number">24</td><td>Réception</td></tr>
+      </tbody>
+    </table>
+    <h2>Consignes</h2>
+    <p>Livrer pendant les heures de bureau. Joindre la référence de commande à l'envoi. Cet exemple ne contient aucune information opérationnelle réelle.</p>
+    <p class="note"><strong>Vérification typographique :</strong> élève, Noël, façade, cœur, œuvre, où, à bientôt — 25 °C. <em>Les accents, les ligatures et la ponctuation doivent rester lisibles.</em></p>
+  </section>
+</body>
+</html>

@@ -1,0 +1,490 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Pressroom",
+    "version": "v1",
+    "description": "Synchronous rendering of self-contained HTML to PDF. All resources must be inline or data URLs. The complete JSON body is limited to 25 MiB by default."
+  },
+  "security": [
+    {
+      "ApiKey": []
+    },
+    {
+      "Windows": []
+    }
+  ],
+  "paths": {
+    "/v1/render": {
+      "post": {
+        "operationId": "render",
+        "summary": "Render self-contained HTML to PDF",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rendered PDF",
+            "headers": {
+              "X-Render-Pages": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Render-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "inline or attachment as requested, with a sanitized filename and UTF-8 filename*."
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or options",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Complete JSON body too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type or encoding",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Readiness or page execution failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission capacity exhausted",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Suggested retry delay in seconds."
+              }
+            }
+          },
+          "503": {
+            "description": "Browser unavailable or host draining",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Suggested retry delay in seconds."
+              }
+            }
+          },
+          "504": {
+            "description": "Overall processing timeout",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Minimal anonymous readiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "unavailable"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "unavailable"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/info": {
+      "get": {
+        "operationId": "info",
+        "summary": "Versions, capacity, counters, and packaged fonts",
+        "responses": {
+          "200": {
+            "description": "Operational metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key"
+      },
+      "Windows": {
+        "type": "http",
+        "scheme": "negotiate",
+        "description": "Windows authentication; only selected when X-Api-Key is absent."
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "PageSize": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "Letter",
+              "Legal",
+              "Tabloid",
+              "A3",
+              "A4",
+              "A5"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "string",
+                "example": "8.5in"
+              },
+              "height": {
+                "type": "string",
+                "example": "11in"
+              }
+            }
+          }
+        ]
+      },
+      "Margins": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "top": {
+            "type": "string",
+            "default": "20mm"
+          },
+          "right": {
+            "type": "string",
+            "default": "15mm"
+          },
+          "bottom": {
+            "type": "string",
+            "default": "20mm"
+          },
+          "left": {
+            "type": "string",
+            "default": "15mm"
+          }
+        }
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "type": "string",
+            "nullable": true
+          },
+          "function": {
+            "type": "string",
+            "nullable": true,
+            "description": "JavaScript expression, for example window.readyToPrint === true. Invalid if JavaScript is disabled."
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 5000
+          }
+        },
+        "description": "All supplied conditions share one readiness timeout, within the overall request deadline."
+      },
+      "RenderOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pageSize": {
+            "$ref": "#/components/schemas/PageSize"
+          },
+          "margins": {
+            "$ref": "#/components/schemas/Margins"
+          },
+          "landscape": {
+            "type": "boolean",
+            "default": false
+          },
+          "preferCssPageSize": {
+            "type": "boolean",
+            "default": false
+          },
+          "printBackground": {
+            "type": "boolean",
+            "default": true
+          },
+          "displayHeaderFooter": {
+            "type": "boolean",
+            "default": true
+          },
+          "tagged": {
+            "type": "boolean",
+            "default": true
+          },
+          "outline": {
+            "type": "boolean",
+            "default": true
+          },
+          "javaScript": {
+            "type": "boolean",
+            "default": true
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 2,
+            "default": 1
+          },
+          "headerTemplate": {
+            "type": "string",
+            "nullable": true
+          },
+          "footerTemplate": {
+            "type": "string",
+            "nullable": true
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "print",
+              "screen"
+            ],
+            "default": "print"
+          },
+          "locale": {
+            "type": "string",
+            "default": "en-CA"
+          },
+          "timeZone": {
+            "type": "string",
+            "default": "America/Edmonton"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/Readiness"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "default": 30000,
+            "description": "Overall processing timeout from admission, including body reading and queue time. Maximum defaults to 60000; response transfer is excluded."
+          }
+        }
+      },
+      "RenderRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "html"
+        ],
+        "properties": {
+          "html": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fileName": {
+            "type": "string",
+            "default": "document.pdf"
+          },
+          "options": {
+            "$ref": "#/components/schemas/RenderOptions"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "inline",
+              "attachment"
+            ],
+            "default": "attachment",
+            "description": "Controls the PDF Content-Disposition header: inline asks the browser to display the PDF; attachment asks it to download the file. The browser and caller application retain control of the final presentation."
+          }
+        }
+      }
+    }
+  }
+}

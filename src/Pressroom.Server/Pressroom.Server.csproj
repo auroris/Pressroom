@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+    <RootNamespace>Pressroom.Server</RootNamespace>
+    <AssemblyName>Pressroom.Server</AssemblyName>
+    <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
+    <ProjectReference Include="../Pressroom.Rendering/Pressroom.Rendering.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.13" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="openapi.json" />
+  </ItemGroup>
+  <Import Project="Pressroom.Publish.targets" />
+</Project>

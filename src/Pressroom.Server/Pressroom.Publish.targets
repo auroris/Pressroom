@@ -1,0 +1,55 @@
+<Project>
+  <!-- Imported by Pressroom.Server.csproj. These targets run during Publish, never ordinary Build. -->
+  <PropertyGroup>
+    <PressroomBundleBrowser Condition="'$(PressroomBundleBrowser)' == ''">true</PressroomBundleBrowser>
+    <EnableMsDeployAppOffline Condition="'$(EnableMsDeployAppOffline)' == ''">true</EnableMsDeployAppOffline>
+    <_PressroomPublishHelper>$(MSBuildThisFileDirectory)..\..\build\Publish-Pressroom.ps1</_PressroomPublishHelper>
+  </PropertyGroup>
+
+  <Target Name="PressroomPrepareBrowserBundle"
+          BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(PressroomBundleBrowser)' == 'true'">
+    <Error Condition="'$(OS)' != 'Windows_NT'"
+           Text="The complete Pressroom IIS package must be published on Windows. For a development-only cross-platform publish, explicitly set PressroomBundleBrowser=false; that output is not the complete IIS release." />
+    <Error Condition="'$(RuntimeIdentifier)' != 'win-x64'"
+           Text="Select win-x64 as the target runtime in the Visual Studio publish profile. Pressroom packages its matching Windows x64 browser." />
+    <Error Condition="'$(PublishSingleFile)' == 'true' or '$(PublishTrimmed)' == 'true' or '$(PublishAot)' == 'true'"
+           Text="The Pressroom IIS profile requires ordinary folder publishing: disable single-file, trimming, and AOT." />
+    <PropertyGroup>
+      <_PressroomBundleDirectory>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'pressroom-bundle'))</_PressroomBundleDirectory>
+      <_PressroomCheckDirectory>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'pressroom-check'))</_PressroomCheckDirectory>
+      <_PressroomBuildDirectory>$([System.IO.Path]::GetFullPath('$(TargetDir)'))</_PressroomBuildDirectory>
+      <_PressroomPowerShell Condition="'$(_PressroomPowerShell)' == ''">$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe</_PressroomPowerShell>
+    </PropertyGroup>
+    <Message Text="Pressroom: preparing the version-matched Chromium headless shell for this publish." Importance="high" />
+    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Prepare -BuildDirectory &quot;$(_PressroomBuildDirectory)&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)&quot; -NuGetRoot &quot;$(NuGetPackageRoot)&quot; -SelfContained &quot;$(SelfContained)&quot;" />
+  </Target>
+
+  <Target Name="PressroomIncludeAndVerifyBrowserBundle"
+          AfterTargets="ComputeFilesToPublish"
+          BeforeTargets="CopyFilesToPublishDirectory"
+          DependsOnTargets="PressroomPrepareBrowserBundle"
+          Condition="'$(PressroomBundleBrowser)' == 'true'">
+    <ItemGroup>
+      <_PressroomBundledFiles Include="$(_PressroomBundleDirectory)\**\*" />
+      <ResolvedFileToPublish Include="@(_PressroomBundledFiles)">
+        <RelativePath>%(_PressroomBundledFiles.RecursiveDir)%(_PressroomBundledFiles.Filename)%(_PressroomBundledFiles.Extension)</RelativePath>
+        <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <!-- Check an isolated local staging copy before Folder/Web Deploy transfer begins. -->
+    <RemoveDir Directories="$(_PressroomCheckDirectory)" />
+    <MakeDir Directories="$(_PressroomCheckDirectory)" />
+    <Copy SourceFiles="@(ResolvedFileToPublish)"
+          DestinationFiles="@(ResolvedFileToPublish->'$(_PressroomCheckDirectory)\%(RelativePath)')" />
+    <Message Text="Pressroom: checking the complete published renderer before deployment." Importance="high" />
+    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Verify -BuildDirectory &quot;$(_PressroomCheckDirectory)&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)&quot; -NuGetRoot &quot;$(NuGetPackageRoot)&quot; -SelfContained &quot;$(SelfContained)&quot;" />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(_PressroomBundleDirectory)\release-manifest.json">
+        <RelativePath>release-manifest.json</RelativePath>
+        <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <RemoveDir Directories="$(_PressroomCheckDirectory)" />
+  </Target>
+</Project>

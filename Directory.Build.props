@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>14.0</LangVersion>
+    <Deterministic>true</Deterministic>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <Version>0.1.0</Version>
+    <Authors>Pressroom</Authors>
+    <!-- Keep referenced projects on the same private driver platform during profile publishing. -->
+    <PlaywrightPlatform Condition="'$(PublishProfile)' == 'IisFolder' or '$(PublishProfile)' == 'IisFolderSelfContained'">win-x64</PlaywrightPlatform>
+  </PropertyGroup>
+</Project>

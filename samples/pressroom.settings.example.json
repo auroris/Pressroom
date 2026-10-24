@@ -1,0 +1,16 @@
+{
+  "Paths": {
+    "StateRoot": "C:\\ProgramData\\Pressroom"
+  },
+  "Auth": {
+    "WindowsEnabled": true,
+    "ApiKeys": {},
+    "RequireGroup": false,
+    "AccessGroup": ""
+  },
+  "Render": {
+    "Concurrency": 2,
+    "QueueLimit": 8,
+    "ChromiumSandbox": true
+  }
+}

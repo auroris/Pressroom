@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>HTTP client for Pressroom. Does not install or depend on Playwright.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
+  </ItemGroup>
+</Project>
