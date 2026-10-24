@@ -51,6 +51,7 @@ public sealed record RenderOptions
     public bool Tagged { get; init; } = true;
     public bool Outline { get; init; } = true;
     public string Media { get; init; } = "print";
+    /// <summary>Allow document scripts if the API key permits them; false always disables them.</summary>
     public bool JavaScript { get; init; } = true;
     public string Locale { get; init; } = "en-CA";
     public string TimeZone { get; init; } = "America/Edmonton";

@@ -70,10 +70,20 @@ status codes and `WWW-Authenticate` headers.
 | `Anonymous`: no key | Successful render, `/v1/info`, and OpenAPI access |
 | `Anonymous`: valid configured key | Success |
 | `ApiKey`: no keys configured | Startup fails with a configuration error |
+| Either mode: key with omitted or false `AllowJavaScript`, and omitted or true request `javaScript` | Static render; document scripts do not execute |
+| `Anonymous`: omitted or true `javaScript` without a key | Static render; document scripts do not execute |
+| Either mode: key with `AllowJavaScript: true`, and omitted or true request `javaScript` | Chart scripts and readiness expression execute |
+| Either mode: opted-in configured key plus `javaScript: false` | Static render; document scripts do not execute |
+| Invalid key settings or duplicate configured secrets | Startup fails with a configuration error |
 
 Verify `/v1/health` remains anonymous in both modes. Verify `/v1/info` and OpenAPI
 require a valid key in API-key mode. API tests with a controlled host do not
 replace these deployment checks.
+Use a document with inline scripts, data-backed scripts, event handlers and child
+frames to confirm they do not execute when JavaScript is disabled. Check that
+static text, embedded images, CSS and packaged fonts still render. A caller
+readiness function with JavaScript effectively disabled must return 400, including
+when the request says `javaScript: true` but the key lacks permission.
 
 Change a rendering limit and a valid key in the external JSON file, restart, and
 confirm both changes take effect. Check that the application reads the file named
@@ -89,12 +99,13 @@ outer-limit rejection may use a native IIS response.
 
 Fill active and waiting capacity, verify 429 and `Retry-After`, and confirm queue
 saturation alone does not make `/v1/health` fail. Cancel queued and active requests,
-including an expensive script/print operation. Confirm capacity is actually
+including an expensive script/print operation using an opted-in key. Confirm capacity is actually
 released and follow-up renders complete. Readiness failures should return 422;
 the overall deadline should return 504 and terminate the request's browser work.
 
 Try HTTP(S), local-file, frame/popup, CSS, fetch/XHR, WebSocket, and service-worker
-resource access from controlled fixture documents. Confirm the intended blocking
+resource access from controlled fixture documents. Run script-based probes with
+an opted-in key so the attempts actually execute. Confirm the intended blocking
 and confirm logs contain no raw URLs, document text, page errors/console text,
 PDF content, or keys. A strict no-egress requirement also needs an independently
 enforced network policy.

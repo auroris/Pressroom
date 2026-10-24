@@ -1,5 +1,33 @@
 # Verification record
 
+## API-key JavaScript permission — 2026-10-24
+
+Each `Auth:ApiKeys` entry is now an object with `Secret` and optional
+`AllowJavaScript`, which defaults to `false`. An opted-in key enables scripts
+automatically. The request may opt out with `javaScript: false`; it cannot grant
+permission. Anonymous requests always have scripts disabled. Effective settings
+are applied before validation, so readiness expressions cannot bypass the key's
+permission. Duplicate secrets and invalid key objects fail configuration validation.
+
+The Release solution suite passed **147 tests, zero failed, zero skipped** on
+Windows, with real-browser tests enabled and Chromium's sandbox explicitly on.
+HTTP tests covered automatic key permission, request opt-out, other keys,
+anonymous callers, invalid/duplicate headers and host-principal claims.
+
+A real-browser test rendered the same payload with scripts disabled and enabled.
+Inline scripts, data-backed scripts, modules and load handlers were blocked in
+the main document, data frames and srcdoc frames when disabled; the enabled
+control executed them. Static data-backed CSS, PNG images, packaged fonts and
+selector readiness remained functional. Existing network/file isolation probes
+continued to execute with scripts enabled and passed.
+
+Font loading itself uses CSS. Fixed, trusted Playwright automation installs the
+packaged font rules and waits for font readiness while caller scripts remain
+disabled. Font injection now runs synchronously: the previous style-tag helper
+waited indefinitely for a load handler suppressed by the script-disabled policy.
+Direct local renderer calls also reject readiness expressions when scripts are
+disabled.
+
 ## Windows configuration and authentication update — 2026-10-24
 
 With .NET SDK 10.0.204 on Windows, the Release build completed with zero warnings

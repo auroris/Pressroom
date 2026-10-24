@@ -256,7 +256,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Api-Key",
-        "description": "A key configured in Auth:ApiKeys. Anonymous mode permits requests without this header; a supplied key must always be valid."
+        "description": "A key configured in Auth:ApiKeys. Anonymous mode permits requests without this header; a supplied key must always be valid. Keys with AllowJavaScript: true enable scripts automatically unless the render request opts out, even in anonymous mode."
       }
     },
     "schemas": {
@@ -355,7 +355,7 @@
           "function": {
             "type": "string",
             "nullable": true,
-            "description": "JavaScript expression, for example window.readyToPrint === true. Invalid if JavaScript is disabled."
+            "description": "JavaScript expression, for example window.readyToPrint === true. Requires a key permitted to execute JavaScript and no javaScript: false opt-out. Returns 400 if JavaScript is effectively disabled."
           },
           "delayMs": {
             "type": "integer",
@@ -406,7 +406,8 @@
           },
           "javaScript": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Set false to disable scripts for this render. Omitted or true uses the API key's AllowJavaScript permission; it cannot grant permission. Keys without that permission and anonymous callers always render with scripts disabled."
           },
           "scale": {
             "type": "number",

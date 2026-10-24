@@ -28,7 +28,7 @@ public sealed class ApiKeyAuthenticationHandler(
         string? keyId = null;
         foreach (var pair in authentication.Value.ApiKeys)
         {
-            var expected = SHA256.HashData(Encoding.UTF8.GetBytes(pair.Value));
+            var expected = SHA256.HashData(Encoding.UTF8.GetBytes(pair.Value.Secret));
             var matches = CryptographicOperations.FixedTimeEquals(candidate, expected);
             if (matches)
                 keyId = pair.Key;
@@ -44,6 +44,8 @@ public sealed class ApiKeyAuthenticationHandler(
             new Claim(ClaimTypes.Name, keyId),
             new Claim(AuthenticationNames.BranchClaim, AuthenticationNames.ApiKey)
         ], AuthenticationNames.ApiKey);
+        if (authentication.Value.ApiKeys[keyId].AllowJavaScript)
+            identity.AddClaim(new Claim(AuthenticationNames.JavaScriptClaim, "true"));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
     }
 

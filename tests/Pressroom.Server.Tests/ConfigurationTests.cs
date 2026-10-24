@@ -16,10 +16,11 @@ public sealed class ConfigurationTests : IDisposable
     public void ApiKeyModeRequiresAtLeastOneConfiguredKey()
     {
         Assert.Equal(AuthMode.ApiKey, new AuthSettings().Mode);
+        Assert.False(new ApiKeySettings().AllowJavaScript);
         Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings()));
         ServerConfiguration.ValidateAuthSettings(new AuthSettings
         {
-            ApiKeys = new() { ["caller"] = TestApplication.Secret }
+            ApiKeys = new() { ["caller"] = new() { Secret = TestApplication.Secret } }
         });
     }
 
@@ -28,6 +29,33 @@ public sealed class ConfigurationTests : IDisposable
     {
         ServerConfiguration.ValidateAuthSettings(new AuthSettings { Mode = AuthMode.Anonymous });
         Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings { Mode = (AuthMode)123 }));
+    }
+
+    [Fact]
+    public void DuplicateSecretsCannotHaveAmbiguousJavaScriptPermissions()
+    {
+        foreach (var mode in new[] { AuthMode.ApiKey, AuthMode.Anonymous })
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings
+            {
+                Mode = mode,
+                ApiKeys = new()
+                {
+                    ["static"] = new() { Secret = TestApplication.Secret },
+                    ["charts"] = new() { Secret = TestApplication.Secret, AllowJavaScript = true }
+                }
+            }));
+            Assert.DoesNotContain(TestApplication.Secret, error.Message);
+        }
+    }
+
+    [Fact]
+    public void NullKeyObjectsFailValidation()
+    {
+        Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings
+        {
+            ApiKeys = new() { ["caller"] = null! }
+        }));
     }
 
     [Theory]
@@ -42,7 +70,7 @@ public sealed class ConfigurationTests : IDisposable
             Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings
             {
                 Mode = mode,
-                ApiKeys = new() { [identifier] = secret }
+                ApiKeys = new() { [identifier] = new() { Secret = secret } }
             }));
     }
 
@@ -53,7 +81,7 @@ public sealed class ConfigurationTests : IDisposable
     {
         Assert.Throws<InvalidOperationException>(() => ServerConfiguration.ValidateAuthSettings(new AuthSettings
         {
-            ApiKeys = new() { [new string('i', identifierLength)] = new string('s', secretLength) }
+            ApiKeys = new() { [new string('i', identifierLength)] = new() { Secret = new string('s', secretLength) } }
         }));
     }
 
@@ -68,7 +96,14 @@ public sealed class ConfigurationTests : IDisposable
         });
         WriteJson("pressroom.settings.json", new
         {
-            Auth = new { ApiKeys = new Dictionary<string, string> { ["caller"] = TestApplication.Secret } },
+            Auth = new
+            {
+                ApiKeys = new Dictionary<string, object>
+                {
+                    ["caller"] = new { Secret = TestApplication.Secret },
+                    ["charts"] = new { Secret = TestApplication.StaticSecret, AllowJavaScript = true }
+                }
+            },
             Render = new { Concurrency = 3 }
         });
         using var configuration = new ConfigurationManager();
@@ -77,7 +112,9 @@ public sealed class ConfigurationTests : IDisposable
         Assert.Equal("8", configuration["Render:QueueLimit"]);
         var auth = configuration.GetSection("Auth").Get<AuthSettings>()!;
         Assert.Equal(AuthMode.ApiKey, auth.Mode);
-        Assert.Equal(TestApplication.Secret, auth.ApiKeys["caller"]);
+        Assert.Equal(TestApplication.Secret, auth.ApiKeys["caller"].Secret);
+        Assert.False(auth.ApiKeys["caller"].AllowJavaScript);
+        Assert.True(auth.ApiKeys["charts"].AllowJavaScript);
         ServerConfiguration.ValidateAuthSettings(auth);
     }
 
@@ -111,15 +148,15 @@ public sealed class ConfigurationTests : IDisposable
         {
             Environment.SetEnvironmentVariable(variable, "Anonymous");
             WriteJson("appsettings.json", new { ConfigurationFile = "pressroom.settings.json", Auth = new { Mode = "ApiKey" } });
-            WriteJson("pressroom.settings.json", new { Auth = new { ApiKeys = new Dictionary<string, string> { ["caller"] = TestApplication.Secret } } });
+            WriteJson("pressroom.settings.json", new { Auth = new { ApiKeys = new Dictionary<string, object> { ["caller"] = new { Secret = TestApplication.Secret } } } });
             using var configuration = new ConfigurationManager();
             configuration.AddEnvironmentVariables("PRESSROOM_CONFIGURATION_TEST_");
-            configuration.AddCommandLine(["--Auth:Mode", "Anonymous", "--Auth:ApiKeys:injected", "an-unwanted-command-line-secret"]);
+            configuration.AddCommandLine(["--Auth:Mode", "Anonymous", "--Auth:ApiKeys:injected:Secret", "an-unwanted-command-line-secret"]);
             Assert.Equal("Anonymous", configuration["Auth:Mode"]);
             ApplicationConfiguration.Configure(configuration, _directory);
             Assert.Equal("ApiKey", configuration["Auth:Mode"]);
-            Assert.Null(configuration["Auth:ApiKeys:injected"]);
-            Assert.Equal(TestApplication.Secret, configuration["Auth:ApiKeys:caller"]);
+            Assert.Null(configuration["Auth:ApiKeys:injected:Secret"]);
+            Assert.Equal(TestApplication.Secret, configuration["Auth:ApiKeys:caller:Secret"]);
         }
         finally
         {

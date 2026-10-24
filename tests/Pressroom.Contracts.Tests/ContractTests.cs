@@ -12,6 +12,7 @@ public sealed class ContractTests
         Assert.Empty(RequestValidator.Validate(request));
         Assert.Null(request.Options!.Readiness!.Function);
         Assert.Null(request.Options.TimeoutMs);
+        Assert.True(request.Options.JavaScript);
         Assert.True(request.Options.Tagged);
         Assert.Equal(PdfDisposition.Attachment, request.Disposition);
     }
@@ -94,6 +95,21 @@ public sealed class ContractTests
             Options = new() { JavaScript = false, Readiness = new() { Function = "window.readyToPrint === true" } }
         });
         Assert.Contains("options.readiness.function", errors);
+    }
+
+    [Theory]
+    [InlineData("{}", true)]
+    [InlineData("{\"javaScript\":false}", false)]
+    [InlineData("{\"javaScript\":true}", true)]
+    public void JavaScriptRequestOptionAllowsAnExplicitOptOut(string json, bool expected)
+    {
+        var options = JsonSerializer.Deserialize<RenderOptions>(json, JsonDefaults.Options)!;
+        Assert.Equal(expected, options.JavaScript);
+        var request = new RenderRequest { Html = "<p>Chart</p>", Options = options with
+        {
+            Readiness = new() { Function = "window.readyToPrint === true" }
+        } };
+        Assert.Equal(!expected, RequestValidator.Validate(request).ContainsKey("options.readiness.function"));
     }
 
     [Fact]

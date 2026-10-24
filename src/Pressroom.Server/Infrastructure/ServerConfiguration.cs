@@ -19,8 +19,11 @@ public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOption
     {
         if (!Enum.IsDefined(settings.Mode))
             throw new InvalidOperationException("Auth:Mode must be ApiKey or Anonymous.");
-        if (settings.ApiKeys.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 128 || string.IsNullOrWhiteSpace(pair.Value) || pair.Value.Length is < 16 or > 4096))
-            throw new InvalidOperationException("Auth:ApiKeys must contain named keys with 16–4096 characters; identifiers must be 1–128 characters.");
+        if (settings.ApiKeys is null || settings.ApiKeys.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 128
+            || pair.Value is null || string.IsNullOrWhiteSpace(pair.Value.Secret) || pair.Value.Secret.Length is < 16 or > 4096))
+            throw new InvalidOperationException("Auth:ApiKeys must contain named key objects with a Secret of 16–4096 characters; identifiers must be 1–128 characters.");
+        if (settings.ApiKeys.Values.Select(key => key.Secret).Distinct(StringComparer.Ordinal).Count() != settings.ApiKeys.Count)
+            throw new InvalidOperationException("Auth:ApiKeys entries must use distinct secrets so permissions identify exactly one key.");
         if (settings.Mode == AuthMode.ApiKey && settings.ApiKeys.Count == 0)
             throw new InvalidOperationException("Configure at least one Auth:ApiKeys entry or explicitly set Auth:Mode to Anonymous.");
     }

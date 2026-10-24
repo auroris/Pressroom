@@ -55,9 +55,9 @@ public sealed class ServerTests
     [InlineData("wrong-key-with-enough-length")]
     public async Task InvalidKeyCannotUsePreexistingWindowsPrincipalOrChallengeNegotiate(string key)
     {
-        using var app = new TestApplication(preauthenticatedPrincipal: true);
+        using var app = new TestApplication(preauthenticatedPrincipal: true, javaScriptEnabled: true);
         using var client = app.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JsonBody() };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JavaScriptBody(true) };
         request.Headers.TryAddWithoutValidation("X-Api-Key", key);
         if (key.Length == 0)
             request.Headers.Add("X-Test-Empty-Key", "1");
@@ -111,9 +111,9 @@ public sealed class ServerTests
     [InlineData(AuthMode.Anonymous, "wrong-key-with-enough-length")]
     public async Task SuppliedInvalidKeyIsRejectedInEitherMode(AuthMode mode, string key)
     {
-        using var app = new TestApplication(authMode: mode);
+        using var app = new TestApplication(authMode: mode, javaScriptEnabled: true);
         using var client = app.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JsonBody() };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JavaScriptBody(true) };
         request.Headers.TryAddWithoutValidation("X-Api-Key", key);
         if (key.Length == 0)
             request.Headers.Add("X-Test-Empty-Key", "1");
@@ -128,9 +128,9 @@ public sealed class ServerTests
     [InlineData(AuthMode.Anonymous)]
     public async Task DuplicateKeysAreRejectedInEitherMode(AuthMode mode)
     {
-        using var app = new TestApplication(authMode: mode);
+        using var app = new TestApplication(authMode: mode, javaScriptEnabled: true);
         using var client = app.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JsonBody() };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JavaScriptBody(true) };
         request.Headers.TryAddWithoutValidation("X-Api-Key", new[] { TestApplication.Secret, TestApplication.Secret });
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -144,6 +144,88 @@ public sealed class ServerTests
         using var client = app.CreateAuthenticatedClient();
         using var response = await client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey)]
+    [InlineData(AuthMode.Anonymous)]
+    public async Task UnpermittedKeyCannotEnableJavaScriptInTheRequest(AuthMode mode)
+    {
+        using var app = new TestApplication(authMode: mode, preauthenticatedPrincipal: true);
+        using var client = app.CreateAuthenticatedClient();
+        using var response = await client.PostAsync("/v1/render", JavaScriptBody(true), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(app.Renderer.LastRequest!.Options!.JavaScript);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey, true)]
+    [InlineData(AuthMode.ApiKey, false)]
+    [InlineData(AuthMode.Anonymous, true)]
+    [InlineData(AuthMode.Anonymous, false)]
+    public async Task OptedInKeyHonorsTheRequestedJavaScriptSetting(AuthMode mode, bool enabled)
+    {
+        using var app = new TestApplication(authMode: mode, javaScriptEnabled: true);
+        using var client = app.CreateAuthenticatedClient();
+        using var response = await client.PostAsync("/v1/render", JavaScriptBody(enabled, enabled ? "window.readyToPrint === true" : null), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(enabled, app.Renderer.LastRequest!.Options!.JavaScript);
+        Assert.Equal(enabled ? "window.readyToPrint === true" : null, app.Renderer.LastRequest.Options.Readiness!.Function);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey)]
+    [InlineData(AuthMode.Anonymous)]
+    public async Task JavaScriptPermissionDoesNotApplyToAnotherKey(AuthMode mode)
+    {
+        using var app = new TestApplication(authMode: mode, javaScriptEnabled: true);
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", TestApplication.StaticSecret);
+        using var response = await client.PostAsync("/v1/render", JavaScriptBody(true), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(app.Renderer.LastRequest!.Options!.JavaScript);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnonymousCallerCannotBorrowJavaScriptPermissionFromConfiguredKeysOrHostPrincipal(bool hostPrincipal)
+    {
+        using var app = new TestApplication(authMode: AuthMode.Anonymous, javaScriptEnabled: true, preauthenticatedPrincipal: hostPrincipal);
+        using var client = app.CreateClient();
+        using var response = await client.PostAsync("/v1/render", JavaScriptBody(true), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(app.Renderer.LastRequest!.Options!.JavaScript);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey, false)]
+    [InlineData(AuthMode.ApiKey, true)]
+    [InlineData(AuthMode.Anonymous, false)]
+    [InlineData(AuthMode.Anonymous, true)]
+    public async Task OmittedOptionsUseOnlyTheAuthenticatedKeysJavaScriptPermission(AuthMode mode, bool enabled)
+    {
+        using var app = new TestApplication(authMode: mode, javaScriptEnabled: enabled);
+        using var client = mode == AuthMode.Anonymous && !enabled ? app.CreateClient() : app.CreateAuthenticatedClient();
+        using var body = new StringContent("""{"html":"<p>Static</p>"}""", Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync("/v1/render", body, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(enabled, app.Renderer.LastRequest!.Options!.JavaScript);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey, false)]
+    [InlineData(AuthMode.ApiKey, true)]
+    [InlineData(AuthMode.Anonymous, false)]
+    [InlineData(AuthMode.Anonymous, true)]
+    public async Task ReadinessFunctionCannotBypassDisabledJavaScript(AuthMode mode, bool requested)
+    {
+        using var app = new TestApplication(authMode: mode);
+        using var client = mode == AuthMode.Anonymous ? app.CreateClient() : app.CreateAuthenticatedClient();
+        using var response = await client.PostAsync("/v1/render", JavaScriptBody(requested, "window.readyToPrint = true"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("options.readiness.function", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, app.Renderer.Calls);
     }
 
     [Theory]
@@ -177,6 +259,18 @@ public sealed class ServerTests
     }
 
     [Fact]
+    public void UnknownKeyPermissionsAreRejectedByProductionBinding()
+    {
+        using var app = new TestApplication();
+        using var client = app.CreateClient();
+        app.Services.GetRequiredService<IConfiguration>()["Auth:ApiKeys:integration-test:AllowScripts"] = "true";
+        using var scope = app.Services.CreateScope();
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<AuthSettings>>().Value);
+        Assert.Contains("AllowScripts", exception.ToString());
+    }
+
+    [Fact]
     public async Task StaticHtmlReturnsPdfAndMetadataWithoutReadinessFlag()
     {
         using var app = new TestApplication();
@@ -189,6 +283,7 @@ public sealed class ServerTests
         Assert.Equal("document.pdf", response.Content.Headers.ContentDisposition!.FileNameStar);
         Assert.Equal("attachment", response.Content.Headers.ContentDisposition.DispositionType);
         Assert.Null(app.Renderer.LastRequest!.Options!.Readiness!.Function);
+        Assert.False(app.Renderer.LastRequest.Options.JavaScript);
         Assert.Equal("Letter", app.Renderer.LastRequest.Options.PageSize!.Name);
     }
 
@@ -365,12 +460,19 @@ public sealed class ServerTests
         Html = "<!doctype html><html><body><p>Hello</p></body></html>",
         Options = new RenderOptions { TimeoutMs = timeoutMs }
     }, JsonDefaults.Options), Encoding.UTF8, "application/json");
+
+    private static StringContent JavaScriptBody(bool enabled, string? readinessFunction = null) => new(JsonSerializer.Serialize(new RenderRequest
+    {
+        Html = "<p>Document</p><script>window.readyToPrint = true;</script>",
+        Options = new() { JavaScript = enabled, Readiness = new() { Function = readinessFunction } }
+    }, JsonDefaults.Options), Encoding.UTF8, "application/json");
 }
 
-internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true)
+internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true, bool javaScriptEnabled = false)
     : WebApplicationFactory<Program>
 {
     public const string Secret = "a-test-only-secret-with-32-characters";
+    public const string StaticSecret = "a-static-test-key-without-javascript-permission";
     private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "pressroom-tests", Guid.NewGuid().ToString("N"));
     public FakeRenderer Renderer { get; } = new();
     public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -383,7 +485,11 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
         var auth = new Dictionary<string, object>
         {
             ["Mode"] = authMode.ToString(),
-            ["ApiKeys"] = configureKey ? new Dictionary<string, string> { ["integration-test"] = Secret } : new Dictionary<string, string>()
+            ["ApiKeys"] = configureKey ? new Dictionary<string, ApiKeySettings>
+            {
+                ["integration-test"] = new() { Secret = Secret, AllowJavaScript = javaScriptEnabled },
+                ["static-test"] = new() { Secret = StaticSecret }
+            } : new Dictionary<string, ApiKeySettings>()
         };
         var settingsPath = Path.Combine(_stateRoot, "pressroom.settings.json");
         File.WriteAllText(settingsPath, JsonSerializer.Serialize(new { Auth = auth }));
@@ -439,7 +545,10 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
             builder.Use(async (context, following) =>
             {
                 if (principal)
-                    context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "TEST\\member")], "Windows"));
+                    context.User = new ClaimsPrincipal(new ClaimsIdentity([
+                        new Claim(ClaimTypes.Name, "TEST\\member"),
+                        new Claim(AuthenticationNames.JavaScriptClaim, "true")
+                    ], "Windows"));
                 // TestServer's HttpClient adapter drops zero-length request header values.
                 // Recreate the header dictionary seen by the real server for this edge case.
                 if (context.Request.Headers.ContainsKey("X-Test-Empty-Key"))

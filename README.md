@@ -167,14 +167,17 @@ selected file must exist. For a local run or package check, `--config <path>` ca
 select the file. Application settings do not use environment-variable overrides.
 
 The default `Auth:Mode` is `ApiKey`. Configure one or more valid keys in the external
-file under `Auth:ApiKeys`, mapping a nonsecret identifier to each secret:
+file under `Auth:ApiKeys`, mapping a nonsecret identifier to each key's settings:
 
 ```json
 {
   "Auth": {
     "Mode": "ApiKey",
     "ApiKeys": {
-      "reporting-app": "REPLACE_WITH_A_RANDOMLY_GENERATED_SECRET"
+      "reporting-app": {
+        "Secret": "REPLACE_WITH_A_RANDOMLY_GENERATED_SECRET",
+        "AllowJavaScript": false
+      }
     }
   }
 }
@@ -182,8 +185,20 @@ file under `Auth:ApiKeys`, mapping a nonsecret identifier to each secret:
 
 Replace the illustrative value before use; the application ships without a key.
 Generate each secret from at least 32 random bytes. Key values must contain
-16–4096 characters and identifiers 1–128 characters. API-key mode fails startup
-when no keys are configured. Callers send a valid secret in `X-Api-Key`.
+16–4096 characters and identifiers 1–128 characters. Secrets must be unique across
+key IDs. API-key mode fails startup when no keys are configured. Callers send a
+valid secret in `X-Api-Key`.
+
+JavaScript permission is off for every key by default. To allow a chart-producing
+application to execute scripts, set `"AllowJavaScript": true` on its key and
+restart the service. The key enables scripts automatically; no request flag is
+needed. A caller can disable scripts for an individual render with
+`"options": { "javaScript": false }`. Setting the request option to `true`
+cannot grant permission to a key that lacks it.
+
+When upgrading an existing configuration, replace each string key value with an
+object containing `Secret`. Add `AllowJavaScript: true` only for keys that need
+scripts; omitting it leaves scripts disabled.
 
 To allow requests without credentials, explicitly select anonymous mode:
 
@@ -199,6 +214,8 @@ To allow requests without credentials, explicitly select anonymous mode:
 Anonymous mode permits access to rendering, service information, and OpenAPI
 without a key. In either mode, a supplied invalid, empty, or duplicate `X-Api-Key`
 returns 401 on those endpoints. `/v1/health` always allows anonymous access.
+Anonymous renders have JavaScript disabled. A caller in anonymous mode may supply
+a valid opted-in key to enable scripts for its request.
 
 Keep real keys in the restricted external file, outside the published release and
 source control. Local `pressroom.settings.json` files are ignored by Git. Keep
@@ -247,13 +264,19 @@ settings and PDF support determine how an inline response is ultimately handled
 Defaults include Letter portrait, print media, background graphics, tagged PDF,
 outlines, and page-number headers/footers. Options allow named or custom paper
 sizes, margins, scale, media, locale, time zone, header/footer HTML, JavaScript,
-readiness conditions, and a bounded processing deadline. Static HTML needs no
-readiness flag. A chart may opt into
-`"readiness": { "function": "window.readyToPrint === true" }`.
+readiness conditions, and a bounded processing deadline. The API key determines
+whether JavaScript runs; static HTML needs no readiness flag. With an opted-in
+key, a chart can use
+`"readiness": { "function": "window.readyToPrint === true" }` without a
+JavaScript flag. The request's `javaScript` option defaults to `true` but can only
+disable the key's permission, never grant it. A readiness function returns 400
+when JavaScript is effectively disabled. Existing script-dependent callers need
+`AllowJavaScript: true` on their key; their requests need no new flag.
 
 Documents must contain their own CSS and assets. Resource URLs are restricted to
-`data:`; network, local-file, and `blob:` resources are blocked. Inline JavaScript
-and CSS remain supported. Browser-enforced Content Security Policy and an empty
+`data:`; network, local-file, and `blob:` resources are blocked. Inline CSS remains
+supported; inline and data-backed scripts require JavaScript permission and an
+omitted or true `javaScript` option. Browser-enforced Content Security Policy and an empty
 Connection Allowlist apply before document parsing, including nested documents;
 the latter also blocks WebRTC, WebTransport, and speculative network connections.
 Offline contexts and request/WebSocket interception provide additional barriers.

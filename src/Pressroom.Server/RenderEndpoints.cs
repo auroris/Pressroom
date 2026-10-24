@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using Pressroom.Contracts;
@@ -123,14 +124,22 @@ public static class RenderEndpoints
             }
 
             if (request.Options is { } suppliedOptions)
+            {
+                // Permissions come only from the API-key handler, never an unrelated
+                // host identity. A request can disable scripts but cannot grant them.
+                var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
+                var javaScriptPermitted = authentication.Succeeded
+                    && authentication.Principal?.HasClaim(AuthenticationNames.JavaScriptClaim, "true") == true;
                 request = request with
                 {
                     Options = suppliedOptions with
                     {
+                        JavaScript = suppliedOptions.JavaScript && javaScriptPermitted,
                         PageSize = suppliedOptions.PageSize ?? PageSize.Named(settings.DefaultPageSize),
                         TimeoutMs = suppliedOptions.TimeoutMs ?? settings.DefaultTimeoutMs
                     }
                 };
+            }
             var errors = RequestValidator.Validate(request, settings.MaxTimeoutMs);
             if (errors.Count == 0)
             {

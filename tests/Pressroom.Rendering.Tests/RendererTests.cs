@@ -53,6 +53,22 @@ public sealed class RendererUnitTests
         Assert.Throws<InvalidOperationException>(() => new RenderSettings { Concurrency = 0 }.Validate());
         Assert.Throws<InvalidOperationException>(() => new RenderSettings { DefaultTimeoutMs = 60_000, MaxTimeoutMs = 30_000 }.Validate());
     }
+
+    [Fact]
+    public async Task DisabledJavaScriptCannotBeBypassedWithALocalReadinessExpression()
+    {
+        using var renderer = new BrowserRenderer(Options.Create(new RenderSettings()),
+            Options.Create(new PathsSettings()), Options.Create(new FontsSettings()),
+            NullLogger<BrowserRenderer>.Instance);
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(new()
+        {
+            Html = "<p>Static document</p>",
+            Options = new() { JavaScript = false, Readiness = new() { Function = "window.executed = true" } }
+        }, TestContext.Current.CancellationToken));
+        Assert.Contains("requires JavaScript", error.Message);
+        Assert.Equal(0, renderer.GetSnapshot().Active);
+        Assert.Equal(0, renderer.GetSnapshot().Queued);
+    }
 }
 
 public sealed class BrowserFactAttribute : FactAttribute
@@ -186,6 +202,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
         var elapsed = Stopwatch.StartNew();
         var error = await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync("<p>Never ready</p>", new()
         {
+            JavaScript = true,
             Readiness = new() { Function = "false", TimeoutMs = 150 }
         }));
         Assert.Contains("readiness", error.Message);
@@ -201,6 +218,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
         using var cancellation = new CancellationTokenSource(200);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.RenderAsync("<p>Waiting</p>", new()
         {
+            JavaScript = true,
             Readiness = new() { Function = "false", TimeoutMs = 10_000 }
         }, cancellation.Token));
         Assert.Equal(0, fixture.Renderer.GetSnapshot().Active);
@@ -223,7 +241,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
             const ws = new WebSocket('ws://127.0.0.1:{{port}}/socket'); ws.onerror = () => {};
             try { if (navigator.serviceWorker) navigator.serviceWorker.register('http://127.0.0.1:{{port}}/worker.js').catch(() => {}); } catch {}
             </script></body></html>
-            """, new() { Readiness = new() { DelayMs = 300 } });
+            """, new() { JavaScript = true, Readiness = new() { DelayMs = 300 } });
         Assert.True(result.BlockedResources >= 5);
         Assert.False(listener.Pending());
         Assert.Equal(1, result.PageCount);
@@ -232,7 +250,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
     [BrowserFact]
     public async Task ScriptErrorsReturnOnlyContentFreeDiagnostics()
     {
-        var error = await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync("<script>throw new Error('SECRET_DOCUMENT_VALUE')</script>"));
+        var error = await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync("<script>throw new Error('SECRET_DOCUMENT_VALUE')</script>", new() { JavaScript = true }));
         Assert.DoesNotContain("SECRET_DOCUMENT_VALUE", error.ToString());
         Assert.Contains("JavaScript", error.Message);
     }
@@ -262,6 +280,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
         var previousRestart = fixture.Renderer.GetSnapshot().LastRestartUtc;
         var rendering = fixture.RenderAsync("<p>Active during browser crash</p>", new()
         {
+            JavaScript = true,
             Readiness = new() { Function = "false", TimeoutMs = 10_000 }
         });
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));

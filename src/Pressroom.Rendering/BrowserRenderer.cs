@@ -17,10 +17,12 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
     // This URL is fulfilled once from memory, never fetched. A response header makes
     // the policy effective before parsing and impossible for caller markup to remove.
     private const string DocumentUrl = "https://pressroom.invalid/document";
-    private const string ResourcePolicy = "default-src data:; script-src data: 'unsafe-inline' 'unsafe-eval'; "
+    private const string ResourcePolicy = "default-src data:; "
         + "style-src data: 'unsafe-inline'; connect-src data:; frame-src data:; "
         + "object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
-    private const string DocumentPolicy = ResourcePolicy + "; sandbox allow-scripts";
+    private const string DocumentPolicy = ResourcePolicy + "; script-src 'none'; sandbox";
+    private const string ScriptedDocumentPolicy = ResourcePolicy
+        + "; script-src data: 'unsafe-inline' 'unsafe-eval'; sandbox allow-scripts";
 
     private readonly RenderSettings _settings;
     private readonly PathsSettings _paths;
@@ -100,6 +102,10 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.Options is null) throw new ArgumentException("Render options must be validated before rendering.", nameof(request));
+        // Automation can evaluate expressions even when page scripts are disabled.
+        // Enforce this for local callers as well as requests validated by the server.
+        if (!request.Options.JavaScript && request.Options.Readiness?.Function is not null)
+            throw new ArgumentException("A readiness expression requires JavaScript to be enabled.", nameof(request));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         var processingBudget = request.Options.TimeoutMs ?? _settings.DefaultTimeoutMs;
         if (processingBudget < 1 || processingBudget > _settings.MaxTimeoutMs)
@@ -241,7 +247,7 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
                     Body = request.Html,
                     Headers = new Dictionary<string, string>
                     {
-                        ["Content-Security-Policy"] = DocumentPolicy,
+                        ["Content-Security-Policy"] = request.Options!.JavaScript ? ScriptedDocumentPolicy : DocumentPolicy,
                         // Covers connections outside Playwright routing, including
                         // WebRTC/STUN/TURN, resource hints, and WebTransport.
                         // A local ReportingObserver checks enforcement during warm-up.
@@ -299,10 +305,17 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
         // Reapply media to the committed document before layout/readiness checks.
         await page.EmulateMediaAsync(new() { Media = options.Media == "screen" ? Media.Screen : Media.Print });
         if (verifySandbox) await VerifySandboxAsync(page, token);
-        // Install packaged fonts in the loaded document as data-backed CSS.
-        await page.AddStyleTagAsync(new() { Content = _fonts!.Css });
+        // Install trusted, data-backed font CSS synchronously. AddStyleTag waits
+        // for a load handler that Chromium suppresses when scripts are disabled.
+        await BoundAsync(page.EvaluateAsync("""
+            css => {
+                const style = document.createElement('style');
+                style.textContent = css;
+                document.head.append(style);
+            }
+            """, _fonts!.Css), token);
         await WaitForReadinessAsync(page, options.Readiness!, token);
-        await BoundAsync(page.EvaluateAsync("async () => { await document.fonts.ready; }"), token);
+        await BoundAsync(page.EvaluateAsync("async () => { document.documentElement.getBoundingClientRect(); await document.fonts.ready; }"), token);
         if (Volatile.Read(ref pageError) != 0)
             throw new RenderDocumentException("The document raised a JavaScript exception before printing.");
         token.ThrowIfCancellationRequested();
@@ -505,7 +518,8 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
                 var rendered = await RenderDocumentAsync(context, new RenderRequest
                 {
                     Html = "<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Pressroom warm-up</title></head><body style=\"font-family:'Noto Sans',sans-serif\"><h1>Pressroom</h1><p>Ready — prêt. Éé Àà Çç Œœ.</p></body></html>",
-                    Options = new RenderOptions { DisplayHeaderFooter = false, JavaScript = false }
+                    // Only this fixed, trusted document enables scripts for the RTC probe.
+                    Options = new RenderOptions { DisplayHeaderFooter = false, JavaScript = true }
                 }, warmup.Token, verifySandbox: true).WaitAsync(warmup.Token);
                 if (rendered.PageCount != 1 || rendered.Pdf.Length < 100)
                     throw new InvalidOperationException("The browser warm-up did not produce a one-page PDF.");
@@ -689,7 +703,7 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
     // Chromium prints headers/footers in separate documents. Their parser must see
     // the resource policy before any caller-supplied markup, too.
     private static string? ProtectPrintTemplate(string? template) => template is null ? null
-        : $"<meta http-equiv=\"Content-Security-Policy\" content=\"{ResourcePolicy}\">{template}";
+        : $"<meta http-equiv=\"Content-Security-Policy\" content=\"{ResourcePolicy}; script-src 'none'\">{template}";
 
     private static void Observe(Task task) => _ = task.ContinueWith(completed => _ = completed.Exception,
         CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);

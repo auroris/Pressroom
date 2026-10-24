@@ -21,6 +21,53 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
     }
 
     [BrowserFact]
+    public async Task DisabledJavaScriptBlocksPageAndNestedScriptsWhileStaticResourcesRender()
+    {
+        const string png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+        string Content(string prefix) => $$"""
+            <p>{{prefix}}_STATIC</p><p id="result"></p><noscript>{{prefix}}_NOSCRIPT</noscript>
+            <script>document.querySelector('#result').append('{{prefix}}_INLINE ');</script>
+            <script src="{{DataUrl("text/javascript", $"document.querySelector('#result').append('{prefix}_DATA ');")}}"></script>
+            <script type="module">document.querySelector('#result').append('{{prefix}}_MODULE ');</script>
+            <img width="20" height="20" src="{{png}}" onload="document.querySelector('#result').append('{{prefix}}_HANDLER ')">
+            """;
+        var html = $$"""
+            <!doctype html><html><head><style>.css-marker { display:none; } body { font:9px 'Noto Sans'; }</style>
+            <link rel="stylesheet" href="{{DataUrl("text/css", ".css-marker { display:block; }")}}"></head><body>
+            <p class="css-marker" id="static-ready">DATA_CSS_VISIBLE</p>{{Content("MAIN")}}
+            <iframe width="600" height="150" src="{{DataUrl("text/html", Content("DATA_FRAME"))}}"></iframe>
+            <iframe width="600" height="150" srcdoc="{{WebUtility.HtmlEncode(Content("SRCDOC_FRAME"))}}"></iframe>
+            </body></html>
+            """;
+
+        // Use the same payload with scripts enabled as a positive control: an absent
+        // marker only proves blocking if that execution path can actually run.
+        foreach (var javaScript in new[] { false, true })
+        {
+            var result = await fixture.RenderAsync(html, new()
+            {
+                JavaScript = javaScript,
+                DisplayHeaderFooter = false,
+                Readiness = new() { Selector = "#static-ready", DelayMs = 100 }
+            });
+            var text = PdfText(result.Pdf);
+            Assert.Contains("DATA_CSS_VISIBLE", text);
+            foreach (var prefix in new[] { "MAIN", "DATA_FRAME", "SRCDOC_FRAME" })
+            {
+                Assert.Contains(prefix + "_STATIC", text);
+                foreach (var suffix in new[] { "INLINE", "DATA", "MODULE", "HANDLER" })
+                    if (javaScript) Assert.Contains(prefix + "_" + suffix, text);
+                    else Assert.DoesNotContain(prefix + "_" + suffix, text);
+                if (!javaScript) Assert.Contains(prefix + "_NOSCRIPT", text);
+            }
+            using var pdf = PdfDocument.Open(result.Pdf);
+            Assert.True(pdf.GetPages().Sum(page => page.NumberOfImages) > 0, "Embedded PNGs must still render with scripts disabled.");
+            Assert.Contains(pdf.GetPages().SelectMany(page => page.Letters),
+                letter => letter.FontName?.Contains("NotoSans", StringComparison.Ordinal) == true);
+        }
+    }
+
+    [BrowserFact]
     public async Task DataImagesStylesScriptsAndNestedDocumentsStillRender()
     {
         var script = DataUrl("text/javascript", "window.embeddedScriptRan = true;");
@@ -48,7 +95,8 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
                 Readiness = new()
                 {
                     Function = "window.embeddedScriptRan === true && window.embeddedFetchFinished === true && document.querySelector('#embedded').naturalWidth === 1 && getComputedStyle(document.querySelector('#styled')).color === 'rgb(1, 2, 3)'"
-                }
+                },
+                JavaScript = true
             });
         var text = PdfText(result.Pdf);
         Assert.Contains("EMBEDDED_RESOURCES", text);
@@ -122,6 +170,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             """, new()
             {
                 DisplayHeaderFooter = false,
+                JavaScript = true,
                 Readiness = new() { Function = "window.attemptsFinished === true", DelayMs = 1_000 }
             });
         Assert.False(listener.Pending(), "A document resource or connection reached the loopback TCP listener.");
@@ -164,6 +213,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             """, new()
             {
                 DisplayHeaderFooter = false,
+                JavaScript = true,
                 Readiness = new() { Function = "window.udpAttemptFinished === true", DelayMs = 1_500 }
             });
         Assert.Equal(0, listener.Available);
@@ -197,6 +247,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             """, new()
             {
                 DisplayHeaderFooter = false,
+                JavaScript = true,
                 Readiness = new() { Function = "window.blobProbesFinished === true" }
             });
         Assert.Contains("BLOB_RESOURCES_BLOCKED", PdfText(result.Pdf));
@@ -239,6 +290,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
                 """, new()
                 {
                     DisplayHeaderFooter = false,
+                    JavaScript = true,
                     Readiness = new() { Function = "window.fileProbesFinished === true", DelayMs = 200 }
                 });
             var text = PdfText(result.Pdf);
@@ -315,7 +367,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
         // Verify the failure remains contained and cannot grant network access.
         await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync(
             $"<p>SRCDOC_PROBE</p><iframe srcdoc=\"{WebUtility.HtmlEncode(child)}\"></iframe>",
-            new() { Readiness = new() { DelayMs = 1_500 } }));
+            new() { JavaScript = true, Readiness = new() { DelayMs = 1_500 } }));
         Assert.False(tcp.Pending(), "A srcdoc WebRTC TURN attempt reached the TCP listener.");
         Assert.Equal(0, udp.Available);
         Assert.Equal(1, (await fixture.RenderAsync("<p>RTC failure recovered</p>")).PageCount);
@@ -328,7 +380,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             <p>ORIGINAL_DOCUMENT</p><script>
             location.href = URL.createObjectURL(new Blob(['<p>REPLACEMENT_DOCUMENT</p>'], { type:'text/html' }));
             </script>
-            """, new() { Readiness = new() { DelayMs = 200 } }));
+            """, new() { JavaScript = true, Readiness = new() { DelayMs = 200 } }));
         Assert.Equal(1, (await fixture.RenderAsync("<p>Navigation rejection recovered</p>")).PageCount);
     }
 
@@ -359,6 +411,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             """, new()
             {
                 DisplayHeaderFooter = false,
+                JavaScript = true,
                 Readiness = new() { Function = "window.storageProbesFinished === true" }
             });
         Assert.Contains("PERSISTENT_STORAGE_BLOCKED", PdfText(result.Pdf));
@@ -379,7 +432,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
                 """;
             try
             {
-                var result = await fixture.RenderAsync(html, new() { DisplayHeaderFooter = false, Readiness = new() { DelayMs = 200 } });
+                var result = await fixture.RenderAsync(html, new() { JavaScript = true, DisplayHeaderFooter = false, Readiness = new() { DelayMs = 200 } });
                 Assert.DoesNotContain(marker, PdfText(result.Pdf));
             }
             catch (RenderDocumentException error)
