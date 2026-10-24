@@ -8,6 +8,41 @@ Applications submit self-contained HTML over HTTP and receive PDF bytes. The
 optional `Pressroom.Client` library provides a .NET client without adding a browser
 dependency to the calling application.
 
+## Create a GitHub release
+
+The [Release workflow](.github/workflows/release.yml) runs manually. Once it is on
+the repository's default branch:
+
+1. Open **Actions → Release → Run workflow** and select the branch to release.
+2. Enter an unused version without a `v` prefix, such as `1.2.3` or `1.2.3-rc.1`.
+3. Optionally select **draft** or **prerelease**, then click **Run workflow**.
+   Versions with a suffix such as `-rc.1` are automatically marked as prereleases.
+
+The workflow restores locked dependencies, builds and tests the solution on
+Windows, and publishes both IIS profiles. Each publish must pass the real Chromium
+PDF warm-up before the workflow creates a release tagged `v<version>` at the exact
+commit selected when the run started. Existing tags and releases are never
+overwritten. If an interrupted upload leaves a draft or tag, inspect it before
+retrying with that version.
+
+Each release contains:
+
+- `Pressroom-<version>-win-x64-framework-dependent.zip`: requires .NET 10 on the server.
+- `Pressroom-<version>-win-x64-self-contained.zip`: includes the .NET runtime.
+- A `.zip.sha256` checksum file for each ZIP.
+
+Both ZIPs contain the complete application, private Playwright driver, Chromium,
+fonts, and release manifest. Extract the entire archive; the `.playwright` folder
+is required. Both variants still require the .NET 10 Hosting Bundle for IIS.
+Configure API keys or anonymous access in the external JSON file described below.
+Target-server acceptance remains a separate deployment check.
+
+The workflow uses GitHub's built-in token; no personal token or application secrets
+are required. Only the release job has repository write permission. Verified ZIPs
+are also retained as workflow artifacts for 14 days. See GitHub's
+[manual workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+for the required repository access and default-branch setup.
+
 ## Publish from Visual Studio
 
 Open `Pressroom.slnx` in a Visual Studio installation that supports .NET 10. Select
