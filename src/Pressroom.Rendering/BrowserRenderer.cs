@@ -14,6 +14,14 @@ namespace Pressroom.Rendering;
 /// <summary>One supervised browser with bounded, isolated render contexts.</summary>
 public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
 {
+    // This URL is fulfilled once from memory, never fetched. A response header makes
+    // the policy effective before parsing and impossible for caller markup to remove.
+    private const string DocumentUrl = "https://pressroom.invalid/document";
+    private const string ResourcePolicy = "default-src data:; script-src data: 'unsafe-inline' 'unsafe-eval'; "
+        + "style-src data: 'unsafe-inline'; connect-src data:; frame-src data:; "
+        + "object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+    private const string DocumentPolicy = ResourcePolicy + "; sandbox allow-scripts";
+
     private readonly RenderSettings _settings;
     private readonly PathsSettings _paths;
     private readonly FontsSettings _fontsSettings;
@@ -214,9 +222,33 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
     {
         var blocked = 0;
         var pageError = 0;
+        var documentSupplied = false;
+        IPage? documentPage = null;
+        await context.SetOfflineAsync(true);
         await context.RouteAsync(new Regex(".*"), async route =>
         {
-            if (IsInlineUrl(route.Request.Url)) await route.ContinueAsync();
+            if (!documentSupplied && route.Request.Url == DocumentUrl
+                && route.Request.IsNavigationRequest && route.Request.Method == "GET"
+                && route.Request.Frame == documentPage?.MainFrame)
+            {
+                documentSupplied = true;
+                await route.FulfillAsync(new()
+                {
+                    Status = 200,
+                    ContentType = "text/html; charset=utf-8",
+                    Body = request.Html,
+                    Headers = new Dictionary<string, string>
+                    {
+                        ["Content-Security-Policy"] = DocumentPolicy,
+                        // Covers connections outside Playwright routing, including
+                        // WebRTC/STUN/TURN, resource hints, and WebTransport.
+                        ["Connection-Allowlist"] = "();webrtc=block",
+                        ["X-DNS-Prefetch-Control"] = "off",
+                        ["Referrer-Policy"] = "no-referrer"
+                    }
+                });
+            }
+            else if (route.Request.Url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) await route.ContinueAsync();
             else
             {
                 Interlocked.Increment(ref blocked);
@@ -229,13 +261,19 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
             // Never call ConnectToServer: Playwright keeps this entirely in the context.
             Observe(socket.CloseAsync(new() { Code = 1008, Reason = "External connections are disabled." }));
         });
+        // CSP rejects resources before routing sees them. Keep only the count;
+        // request URLs and browser diagnostics may contain document secrets.
+        context.RequestFailed += (_, request) =>
+        {
+            if (request.Failure == "net::ERR_BLOCKED_BY_CSP") Interlocked.Increment(ref blocked);
+        };
         context.Page += (_, page) => page.PageError += (_, _) => Interlocked.Exchange(ref pageError, 1);
-        var page = await context.NewPageAsync();
+        var page = documentPage = await context.NewPageAsync();
         var options = request.Options!;
         await page.EmulateMediaAsync(new() { Media = options.Media == "screen" ? Media.Screen : Media.Print });
-        await page.SetContentAsync(request.Html, new() { WaitUntil = WaitUntilState.Load, Timeout = 0 });
+        await page.GotoAsync(DocumentUrl, new() { WaitUntil = WaitUntilState.Load, Timeout = 0 });
         token.ThrowIfCancellationRequested();
-        // SetContent replaces the document, so font CSS must be injected afterwards.
+        // Install packaged fonts in the loaded document as data-backed CSS.
         await page.AddStyleTagAsync(new() { Content = _fonts!.Css });
         await WaitForReadinessAsync(page, options.Readiness!, token);
         await BoundAsync(page.EvaluateAsync("async () => { await document.fonts.ready; }"), token);
@@ -286,8 +324,8 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
             PrintBackground = options.PrintBackground,
             Scale = (float)options.Scale,
             DisplayHeaderFooter = options.DisplayHeaderFooter,
-            HeaderTemplate = options.HeaderTemplate,
-            FooterTemplate = options.FooterTemplate,
+            HeaderTemplate = ProtectPrintTemplate(options.HeaderTemplate),
+            FooterTemplate = ProtectPrintTemplate(options.FooterTemplate),
             Tagged = options.Tagged,
             Outline = options.Outline
             // No Path: generated documents stay in the response buffer.
@@ -589,9 +627,10 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
         catch (UnauthorizedAccessException) { _logger.LogWarning("This instance's temporary directory could not be removed with the current permissions."); }
     }
 
-    private static bool IsInlineUrl(string url) => url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
-        || url.Equals("about:blank", StringComparison.OrdinalIgnoreCase)
-        || url.StartsWith("about:blank#", StringComparison.OrdinalIgnoreCase);
+    // Chromium prints headers/footers in separate documents. Their parser must see
+    // the resource policy before any caller-supplied markup, too.
+    private static string? ProtectPrintTemplate(string? template) => template is null ? null
+        : $"<meta http-equiv=\"Content-Security-Policy\" content=\"{ResourcePolicy}\">{template}";
 
     private static void Observe(Task task) => _ = task.ContinueWith(completed => _ = completed.Exception,
         CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
