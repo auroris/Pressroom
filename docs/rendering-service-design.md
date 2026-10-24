@@ -1,8 +1,8 @@
 # Pressroom: HTML-to-PDF rendering service
 
-Status: design baseline, revised 2026-10-23; initial standalone implementation follows this design. Pressroom is a separate solution, with no changes to UmbracoAppHost. Publishing is integrated into Visual Studio; see ../README.md for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
+Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the README](../README.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
 
-Pressroom replaces Apache FOP and RTF templating with one service per environment. Any application that can produce a self-contained HTML document can submit it and receive a PDF. UmbracoAppHost remains responsible for its templates and access checks.
+Pressroom provides HTML-to-PDF rendering as a standalone service. Any application that can produce a self-contained HTML document can submit it and receive a PDF. Calling applications remain responsible for their templates and access checks.
 
 ## 1. Purpose, scope, and deployment objective
 
@@ -25,7 +25,7 @@ The rendering queue is memory-only and bounded. Start with `Render:Concurrency =
 
 An application-owned browser supervisor starts Chromium, performs a warm-up render, tracks health, and coordinates restart and shutdown. Planned recycling after 500 completed render attempts drains active contexts before replacing the browser. A crash fails affected requests and starts a bounded recovery attempt; the process must not create competing replacement browsers.
 
-Multiple instances have independent queues and browser owners. API-key callers can use a conventional load balancer; Windows authentication through a proxy requires a separately validated authentication arrangement. There is no durable job recovery in v1.
+Multiple instances have independent queues and browser owners. Callers can use a conventional load balancer with the same access policy configured on each instance. There is no durable job recovery in v1.
 
 ### Project boundaries
 
@@ -89,7 +89,7 @@ The overall `timeoutMs` covers admitted request processing, queue waiting, docum
 |---|---|---|
 | 200 | Rendered | `application/pdf`; requested inline/attachment `Content-Disposition` with sanitized filename; `X-Render-Pages`; `X-Render-Duration-Ms` |
 | 400 | Invalid JSON, required field, option, unit, or unsupported combination | `application/problem+json` with field information |
-| 401 / 403 | Authentication or authorization failure | Application problem details where applicable; Windows challenges may be host-generated |
+| 401 / 403 | Authentication or authorization failure | Application problem details |
 | 413 | Application request-body limit exceeded | Problem details when Pressroom handles the rejection |
 | 415 | Unsupported media type or request content encoding | Problem details |
 | 422 | Caller readiness failed or uncaught page execution error | Bounded diagnostics for the authenticated caller |
@@ -101,13 +101,13 @@ Native IIS rejection, a lost connection, or forced process termination cannot be
 
 ### `GET /v1/health`
 
-Readiness: 200 only after a successful warm-up and while the browser is available; 503 during startup, replacement, failure, or shutdown. Queue saturation alone is not unhealthy; the render endpoint uses 429. Return a minimal status suitable for an anonymous IIS warm-up/health request. Put detailed versions and operational counters in authenticated `/v1/info`.
+Readiness: 200 only after a successful warm-up and while the browser is available; 503 during startup, replacement, failure, or shutdown. Queue saturation alone is not unhealthy; the render endpoint uses 429. Return a minimal status suitable for an anonymous IIS warm-up/health request. Put detailed versions and operational counters in `/v1/info`, which follows the configured access mode.
 
 ### `GET /v1/info`
 
-Authenticated endpoint reporting application and Playwright versions, Chromium version, active/queued counts, limits, renders since startup, last browser restart, named page sizes, and guaranteed packaged fonts. Any discovered system fonts must be identified separately as machine-dependent. Never return keys, secrets, document content, or internal filesystem paths.
+Endpoint reporting application and Playwright versions, Chromium version, active/queued counts, limits, renders since startup, last browser restart, named page sizes, and guaranteed packaged fonts. It requires a valid API key in API-key mode and allows requests without a key in anonymous mode. Any discovered system fonts must be identified separately as machine-dependent. Never return keys, secrets, document content, or internal filesystem paths.
 
-The OpenAPI document follows the authenticated application policy unless explicitly enabled for anonymous internal access.
+The OpenAPI document follows the same configured access mode as rendering and service information.
 
 ## 4. Input, fonts, and retention
 
@@ -137,15 +137,15 @@ Serilog records request identifiers, caller names/key identifiers, sizes, timing
 
 ## 5. Authentication and process isolation
 
-Support Windows authentication for domain callers and named API keys in `X-Api-Key`. API keys are provisioned outside the release directory, compared in constant time, and identified in logs without exposing the secret. Retain the minimum 16-character validation rule; provision randomly generated keys rather than human passwords. Optional `Auth:RequireGroup` / `Auth:AccessGroup` applies only to the Windows branch.
+Support two explicit settings for `Auth:Mode`: `ApiKey` (the default) and `Anonymous`. API-key mode requires at least one configured key and a valid `X-Api-Key` on rendering, service-information, and OpenAPI requests. Anonymous mode permits requests without that header. Health remains anonymous in both modes. Windows authentication and domain-group authorization are not supported.
 
-A policy scheme selects API-key authentication whenever the header is present, including when its value is empty or invalid. That branch must fail without falling back to a Windows identity and without issuing a Negotiate challenge. Otherwise use Windows authentication. Both authentication and challenge forwarding must follow the selection.
+Provision named keys in `Auth:ApiKeys` in the external JSON configuration file. Compare secrets in constant time and identify them in logs without exposing the secret. Key values must be 16–4096 characters and identifiers 1–128 characters; generate secrets from at least 32 random bytes. A supplied invalid, empty, oversized, or duplicate key fails with 401 on policy-protected endpoints, even in anonymous mode. There is no fallback to a host-supplied identity or a Negotiate challenge.
 
-For mixed authentication under IIS, enable Anonymous Authentication and Windows Authentication. ASP.NET Core performs endpoint authorization; disabling anonymous access at IIS would prevent key-only callers from reaching the application. For in-process hosting, set `IISServerOptions.AutomaticAuthentication = false` and explicitly authenticate through the selected scheme so a prepopulated Windows principal cannot rescue a failed key. Verify these behaviors through real IIS, including response challenge headers. Sources: [Windows authentication][iis-auth] and [AutomaticAuthentication][iis-auto-auth].
+Under IIS, enable Anonymous Authentication and disable Windows Authentication. ASP.NET Core performs endpoint authorization; disabling anonymous access at IIS would prevent callers from reaching the application. For in-process hosting, set `IISServerOptions.AutomaticAuthentication = false` so IIS does not supply an authenticated Windows identity. Verify the configured access mode and response headers through real IIS. See [AutomaticAuthentication][iis-auto-auth].
 
 Run under a dedicated application-pool identity with access only to the required release and runtime locations. Set `ChromiumSandbox = true` explicitly and verify launch under that identity; Playwright's default is false. A launch failure must produce a clear startup error, not silently disable sandboxing. An explicitly documented exception changes the deployment's isolation assumptions. [Launch options][pw-launch].
 
-HTTPS is recommended, particularly for API keys and document content. Plain HTTP remains an explicit deployment choice for a closed intranet, as in the original scope.
+Use HTTPS to protect API keys and document content in transit.
 
 ## 6. Rendering and lifecycle
 
@@ -171,7 +171,7 @@ On host shutdown, stop admission, cancel waiting entries, and drain/cancel activ
 
 ## 7. Configuration
 
-Published `appsettings.json` contains nonsecret defaults. Load an optional external JSON file selected by `PRESSROOM_CONFIG_FILE`, defaulting to `%ProgramData%\Pressroom\pressroom.settings.json`. Apply environment-variable overrides afterward, using the normal double-underscore key format. Explicitly implement this provider order; the extra file is not automatically loaded by ASP.NET Core.
+Published `appsettings.json` contains nonsecret defaults. Load the external JSON settings file afterward. Its default location is the operating system's common application-data directory under `Pressroom/pressroom.settings.json`, normally `C:\ProgramData\Pressroom\pressroom.settings.json` on Windows. A blank or omitted `ConfigurationFile` uses that optional default; set `ConfigurationFile` in `appsettings.json` to select a required file at another location. Resolve relative paths against the application directory. `--config <path>` can also select a file for local runs and package checks. Application settings are read at startup from JSON, without environment-variable or arbitrary command-line overrides; restart after changing them. Real settings files and keys remain outside the release and source control.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -185,13 +185,14 @@ Published `appsettings.json` contains nonsecret defaults. Load an optional exter
 | `Render:BrowsersPath` | `browsers` relative to application base | Packaged Playwright browser tree |
 | `Render:ChromiumPath` | unset | Advanced, explicitly validated executable override |
 | `Render:ChromiumSandbox` | `true` | Explicit launch policy |
-| `Paths:StateRoot` | `%ProgramData%\Pressroom` | Expanded, absolute external runtime location |
+| `ConfigurationFile` | Common application data + `Pressroom/pressroom.settings.json` | External JSON settings; explicitly selected files must exist |
+| `Paths:StateRoot` | Common application data + `Pressroom` on Windows | External runtime location |
 | `Fonts:Manifest` | `fonts/manifest.json` relative to application base | Guaranteed packaged font definitions |
-| `Auth:WindowsEnabled` | `true` | Enable Windows branch; requires host configuration |
-| `Auth:ApiKeys`, `Auth:RequireGroup`, `Auth:AccessGroup` | empty, `false`, empty | Credentials and Windows group restriction |
+| `Auth:Mode` | `ApiKey` | Require a valid key, or explicitly select `Anonymous` to allow requests without a key |
+| `Auth:ApiKeys` | empty | Dictionary of nonsecret identifier to valid API-key secret |
 | Logging policy (fixed in v1) | Console plus up to 14 rolling files, 10 MiB each | Metadata-only logs under the external runtime root; arbitrary Serilog sink settings are not loaded |
 
-Fail startup on invalid limits, missing packaged assets, unusable runtime directories, or an enabled authentication mode that cannot be configured. If Windows authentication is disabled, require configured API keys. Normal releases use their matching bundled browser; a system executable override is outside the standard package compatibility guarantee.
+Fail startup on invalid limits, missing packaged assets, unusable runtime directories, an unsupported authentication mode, invalid key entries, or API-key mode without configured keys. Normal releases use their matching bundled browser; a system executable override is outside the standard package compatibility guarantee.
 
 ## 8. Windows and IIS deployment
 
@@ -221,7 +222,7 @@ If future qualification encounters a demonstrable preflight false positive, `PLA
 
 If the selected stock renderer genuinely cannot pass without Media Foundation, record the exact failure before choosing a fallback. One-time feature provisioning is a separate deployment alternative outside the intended standard package, not a silent relaxation of its acceptance objective. Copying individual Media Foundation DLLs into the application directory is not an equivalent deployment. A custom Chromium build is a last resort because it creates an ongoing browser build/patch workload. Do not use unrelated sandbox/GPU switches as a substitute for proving the dependency behavior.
 
-Enable IIS Windows Authentication when using that branch, and Application Initialization for the warm-service configuration. Provision the site, certificate/binding, dedicated app pool, external configuration, and directory permissions. Routine application upgrades do not repeat this setup.
+Enable IIS Anonymous Authentication, disable Windows Authentication, and enable Application Initialization for the warm-service configuration. Provision the site, certificate/binding, dedicated app pool, external JSON configuration, and directory permissions. Routine application upgrades do not repeat this setup.
 
 ### 8.2 Release contents
 
@@ -240,7 +241,7 @@ Default profile: `net10.0`, `win-x64`, framework-dependent, ordinary folder publ
 
 Preserve the published directory structure, including dot-prefixed `.playwright`. The package's private Node driver makes a separate server Node/npm installation unnecessary. [Driver implementation][pw-driver] and [publish targets][pw-targets].
 
-Pin Playwright and restore dependencies from committed lock information. Download the matching Chromium headless shell during release packaging using that package's CLI with `install --only-shell chromium`. Launch with `Headless = true` and no channel override; this selects Playwright's default headless shell. Use a Windows x64 build environment and clean staging, with `PLAYWRIGHT_BROWSERS_PATH` pointing to its `browsers` directory. Preserve installer-selected companion files; do not hand-prune them just because video recording is unused. [Browser packaging][pw-browsers].
+Pin Playwright and restore dependencies from committed lock information. Download the matching Chromium headless shell during release packaging using that package's CLI with `install --only-shell chromium`. Launch with `Headless = true` and no channel override; this selects Playwright's default headless shell. Use a Windows x64 build environment and clean staging. The publish helper supplies the installer's process-scoped `PLAYWRIGHT_BROWSERS_PATH` automatically. Preserve installer-selected companion files; do not hand-prune them just because video recording is unused. [Browser packaging][pw-browsers].
 
 After build smoke tests, remove only Playwright's `DEPENDENCIES_VALIDATED` cache markers before archiving; preserve `INSTALLATION_COMPLETE`. The validation cache is not proof about the destination machine. A read/execute-only browser directory is the intended production layout; marker writes are best-effort in the current implementation. Test the marker-free artifact under that permission model. [Registry implementation][pw-registry].
 
@@ -267,7 +268,7 @@ Example deployment layout:
 
 Grant ACLs per directory, not blanket modification of the entire release or configuration tree. Resolve application resources using `AppContext.BaseDirectory`. Resolve and validate the runtime root explicitly; do not assume the current working directory or an interactive user's profile.
 
-Before `Playwright.CreateAsync()`, set process-scoped `PLAYWRIGHT_BROWSERS_PATH` to the absolute packaged location and `TEMP`/`TMP` to the instance working directory. The Node driver creates temporary directories before launching the browser, so setting only browser launch environment options is too late. [Launch implementation][pw-launch-source].
+Before `Playwright.CreateAsync()`, the application supplies process-scoped Playwright and temporary-directory settings from its file-based configuration. These internal environment variables are required by the driver and are not operator configuration. The Node driver creates temporary directories before launching the browser, so setting only browser launch environment options is too late. [Launch implementation][pw-launch-source].
 
 Startup checks the driver/browser/font payload, effective paths and permissions, configured native prerequisites, and an actual render before reporting ready. Implement a documented `--check` mode that performs the same preflight and exits with a useful code without installing anything. Stale-folder cleanup must distinguish previous dead instances from another still-running IIS worker.
 
@@ -284,7 +285,7 @@ Startup checks the driver/browser/font payload, effective paths and permissions,
 | Application Initialization | Installed/enabled; warm-up can request `/v1/health` |
 | Idle Time-out | 0 for the warm renderer |
 | Load User Profile | True, alongside explicit writable paths |
-| Authentication | Anonymous plus Windows for mixed mode; application enforces policy |
+| Authentication | Anonymous enabled, Windows disabled; application enforces the configured access mode |
 
 These settings complement application startup/warm-up. [IIS advanced configuration][iis-advanced]; [process model][iis-process].
 
@@ -306,15 +307,15 @@ This is a brief maintenance deployment, not zero-downtime live overwrite. No dat
 
 ## 9. Client library and caller integration
 
-`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, disposition, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. Use a request-object overload to select `Disposition = PdfDisposition.Inline` or `PdfDisposition.Attachment` per request. The caller supplies a reusable HTTP client with a configured Pressroom base URL and Windows credentials or an API key. The HTTP client project has no Playwright dependency.
+`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, disposition, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. Use a request-object overload to select `Disposition = PdfDisposition.Inline` or `PdfDisposition.Attachment` per request. The caller supplies a reusable HTTP client with a Pressroom base URL and API key from its configuration file; omit the key when using anonymous mode. The HTTP client project has no Playwright dependency.
 
 For a server-to-server call, the calling application must set its own browser response's `Content-Disposition` from the selected/returned disposition and sanitized filename. Returning only the PDF bytes does not forward Pressroom's HTTP headers. Use typed framework header/file APIs; preserve the per-request display/download choice through the caller's response.
 
-The caller owns its total deadline and retry policy. This implementation does not automatically retry; 429/503 responses retain `Retry-After` metadata so an explicit caller policy can choose bounded retries. The agreed integration instead permits the caller to deliver its HTML when running under localhost, when a Pressroom URL is absent, or when Pressroom is unavailable. A render response/connection failure can drive that decision without a health probe before every call. Do not automatically retry validation/readiness failures or an overall render timeout.
+The caller owns its total deadline and retry policy. This implementation does not automatically retry; 429/503 responses retain `Retry-After` metadata so an explicit caller policy can choose bounded retries. A caller may instead deliver its HTML when a Pressroom URL is absent or Pressroom is unavailable. A render response/connection failure can drive that decision without a health probe before every call. Do not automatically retry validation/readiness failures or an overall render timeout.
 
 Pressroom itself remains usable on localhost for development and exposes only its rendering API/readiness behavior. Local rendering is a separate explicit use of `Pressroom.Rendering`, with its own browser setup; it is not an automatic fallback in the HTTP client or server.
 
-The calling application remains responsible for its templates, access checks, localization, and HTML fallback. No changes to `C:\Users\steph\source\repos\UmbracoAppHost` are made by this standalone project. Letter remains the default for the 4 Wing report; A4 remains an option.
+The calling application remains responsible for its templates, access checks, localization, and HTML fallback. Letter is the default page size; A4 and other sizes remain available per request.
 
 ## 10. Tests and acceptance
 
@@ -334,11 +335,11 @@ Run with normal Playwright validation enabled. If it alone rejects optional mult
 
 Verify cold start and warm-up, file permissions, an authenticated PDF render with embedded and packaged assets, header/footer fonts, app-pool recycling, child-process cleanup, a stop/copy/start update, and rollback. Run from the published files; never substitute `dotnet run` for this gate. Repeat against the self-contained profile if that profile is released.
 
-Exercise both real-IIS auth paths: valid key without Windows credentials; invalid/empty key despite an authenticated Windows connection; no key with Windows credentials; group restriction; and correct challenge behavior. Check complete JSON sizes near both application and IIS ceilings.
+Exercise both configured access modes through real IIS: API-key mode accepts valid keys and rejects missing, invalid, empty, and duplicate keys; anonymous mode accepts requests without a key and rejects supplied invalid keys. Confirm that host credentials cannot bypass API-key mode and that no Negotiate/NTLM challenges occur. Check complete JSON sizes near both application and IIS ceilings.
 
 Soak with at least a thousand representative renders at configured concurrency, including recycling, and establish bounded memory/process growth and peak memory. Record environment, package/browser versions, font inventory, limits, and results. Acceptance is not claimed until this gate runs successfully.
 
-Functional acceptance: UmbracoAppHost's Orders report prints from the application shell as Letter portrait with page numbers, in both official languages.
+Functional acceptance: the supplied bilingual sample renders as two Letter portrait pages with page numbers and correctly displayed English and French text.
 
 ## 11. Later
 
@@ -401,7 +402,7 @@ Primary documentation and implementation sources checked on 2026-10-23. Version-
 - [CSS Fonts][css-fonts], [CSS Font Loading][css-font-loading], [HTML base element][html-base]
 - [.NET publishing][dotnet-publishing], [runtime selection][runtime-selection], [Task.WaitAsync][task-wait]
 - [IIS hosting][iis-hosting], [Hosting Bundle][hosting-bundle], [in-process hosting][iis-inprocess], [ANCM][ancm]
-- [Windows authentication][iis-auth], [automatic authentication][iis-auto-auth], [request limits][iis-request-limits]
+- [Automatic authentication][iis-auto-auth], [request limits][iis-request-limits]
 - [IIS advanced configuration][iis-advanced], [process model][iis-process], [recycling][iis-recycling], [Robocopy][robocopy]
 - [VC++ redistribution][vc-redist], [Universal CRT][ucrt], [Windows DLL loading][windows-dll-loading]
 - [Chromium media build][chromium-media-build], [media initialization][chromium-mf-init], [Playwright registry][pw-registry], [validation override][pw-validation-override]
@@ -427,7 +428,6 @@ Primary documentation and implementation sources checked on 2026-10-23. Version-
 [hosting-bundle]: https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0
 [iis-inprocess]: https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/in-process-hosting?view=aspnetcore-10.0
 [ancm]: https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/aspnet-core-module?view=aspnetcore-10.0
-[iis-auth]: https://learn.microsoft.com/en-us/aspnet/core/security/authentication/windowsauth?view=aspnetcore-10.0
 [iis-auto-auth]: https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.builder.iisserveroptions.automaticauthentication?view=aspnetcore-10.0
 [iis-request-limits]: https://learn.microsoft.com/en-us/iis/configuration/system.webServer/security/requestFiltering/requestLimits/
 [iis-advanced]: https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/advanced?view=aspnetcore-10.0

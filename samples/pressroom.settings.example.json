@@ -3,10 +3,8 @@
     "StateRoot": "C:\\ProgramData\\Pressroom"
   },
   "Auth": {
-    "WindowsEnabled": true,
-    "ApiKeys": {},
-    "RequireGroup": false,
-    "AccessGroup": ""
+    "Mode": "ApiKey",
+    "ApiKeys": {}
   },
   "Render": {
     "Concurrency": 2,

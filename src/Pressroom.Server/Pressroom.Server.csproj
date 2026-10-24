@@ -9,12 +9,13 @@
   <ItemGroup>
     <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
     <ProjectReference Include="../Pressroom.Rendering/Pressroom.Rendering.csproj" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.13" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="openapi.json" />
+    <!-- Local configuration can contain credentials and never belongs in the release payload. -->
+    <Content Update="**/pressroom.settings.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
   <Import Project="Pressroom.Publish.targets" />
 </Project>

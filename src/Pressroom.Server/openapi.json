@@ -8,9 +8,6 @@
   "security": [
     {
       "ApiKey": []
-    },
-    {
-      "Windows": []
     }
   ],
   "paths": {
@@ -258,12 +255,8 @@
       "ApiKey": {
         "type": "apiKey",
         "in": "header",
-        "name": "X-Api-Key"
-      },
-      "Windows": {
-        "type": "http",
-        "scheme": "negotiate",
-        "description": "Windows authentication; only selected when X-Api-Key is absent."
+        "name": "X-Api-Key",
+        "description": "A key configured in Auth:ApiKeys. Anonymous mode permits requests without this header; a supplied key must always be valid."
       }
     },
     "schemas": {

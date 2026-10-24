@@ -1,13 +1,35 @@
-# Source delivery verification
+# Verification record
 
-Verification was performed in a Linux workspace with a locally installed .NET 10
-SDK. The original Windows repository was not mounted or modified. Pressroom was
-created as a separate solution.
+## Windows configuration and authentication update — 2026-10-24
 
-## Checks performed
+With .NET SDK 10.0.204 on Windows, the Release build completed with zero warnings
+or errors. The solution tests reported **102 passed, zero failed, and eight
+skipped**. The eight optional real-browser tests were not enabled in that run.
 
-- Release compilation succeeds with zero warnings or errors. The consolidated
-  suite passes **83 tests, zero failed and zero skipped**: 45 contract/client tests,
+Coverage includes configured API keys, explicit anonymous access, rejection of
+invalid supplied keys in either mode, and host identities being unable to bypass
+API-key authentication. Configuration tests cover JSON precedence, relative file
+selection, missing explicitly selected files, invalid settings, and exclusion of
+environment-variable and command-line setting overrides.
+
+The framework-dependent `IisFolder` profile also passed a complete Windows publish
+with locked dependency restore. Its isolated JSON-configured `--check` launched
+the bundled Chromium 156.0.8078.4, completed the PDF warm-up with sandboxing and
+dependency validation enabled, and produced the release manifest. The publish
+helper's Windows path quoting and SHA-256 hashing were corrected during this check.
+The self-contained profile and a clean IIS deployment were not exercised in this
+run. Use `windows-acceptance.md` for target-server qualification.
+
+## Historical Linux verification
+
+The initial implementation was verified in a Linux workspace with a locally
+installed .NET 10 SDK. The results below describe that historical run, before the
+file-only configuration and API-key/anonymous authentication update.
+
+### Checks performed
+
+- Release compilation succeeded with zero warnings or errors. The consolidated
+  suite passed **83 tests, zero failed and zero skipped**: 45 contract/client tests,
   24 HTTP API tests, and 14 renderer tests (including real Chromium). The API tests use controlled renderer substitutes for authentication,
   admission, body limits, and error handling; real renderer tests exercise Chromium.
 - Both Windows x64 publish profiles, framework-dependent and self-contained,
@@ -28,9 +50,9 @@ created as a separate solution.
   Noto rule; custom embedded header/footer fonts are therefore unsupported in this
   initial implementation.
 
-## Response disposition checks
+### Response disposition checks
 
-The consolidated passing suite verifies explicit inline and attachment responses,
+The consolidated passing suite verified explicit inline and attachment responses,
 the attachment default, sanitized Unicode filenames, PDF content type, and 400
 responses for invalid disposition values/types. The HTTP client serializes the
 choice and preserves the response disposition in buffered and streaming results.
@@ -38,9 +60,9 @@ choice and preserves the response disposition in buffered and streaming results.
 An additional real HTTP smoke render returned a two-page bilingual PDF through the
 compiled service, with readiness, authenticated info, and OpenAPI returning 200.
 Invalid and missing API keys returned 401 without a Negotiate challenge in API-key
-mode. Actual browser navigation and real IIS authentication remain Windows checks.
+mode. Actual browser navigation and IIS deployment behavior remain Windows checks.
 
-## Toolchain
+### Toolchain
 
 - .NET SDK: 10.0.402; target framework: net10.0.
 - Application version: 0.1.0.
@@ -48,7 +70,7 @@ mode. Actual browser navigation and real IIS authentication remain Windows check
 - Self-contained cross-publish includes .NET and ASP.NET Core 10.0.13.
 - Locked restore was verified for normal solution development and both publish profiles.
 
-## Browser provenance and limits
+### Browser provenance and limits
 
 The Playwright browser CDN download failed in this environment. Real Linux browser
 tests used Google's official Chrome for Testing headless shell at the exact selected
@@ -60,9 +82,9 @@ Visual Studio Publish must acquire the pinned Playwright package's browser paylo
 and pass its real Windows `--check`; there is no silent download-source or system-
 browser fallback. Cross-publishing here explicitly used `PressroomBundleBrowser=false`
 to inspect the Windows managed/native host output. Those temporary outputs are not
-the qualified, complete IIS release and are not the delivered source ZIP.
+the qualified, complete IIS release.
 
-No Windows executable, IIS app-pool identity, Windows authentication exchange,
-Windows Job Object/nested-job execution, or Visual Studio UI was run here. The
+No Windows executable, IIS app-pool identity, Windows Job Object/nested-job
+execution, or Visual Studio UI was run in that verification. The
 clean-server Media Foundation/VC-runtime objective and full publish/IIS workflow
 remain the checks in `windows-acceptance.md`.

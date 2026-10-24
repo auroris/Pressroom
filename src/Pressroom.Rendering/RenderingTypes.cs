@@ -71,7 +71,7 @@ public sealed class FontsSettings
 public sealed class PathsSettings
 {
     public string StateRoot { get; set; } = OperatingSystem.IsWindows()
-        ? @"%ProgramData%\Pressroom"
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Pressroom")
         : Path.Combine(Path.GetTempPath(), "Pressroom");
 }
 
@@ -79,9 +79,9 @@ public static class RuntimePaths
 {
     public static string ResolveStateRoot(PathsSettings settings)
     {
-        var value = Environment.ExpandEnvironmentVariables(settings.StateRoot);
+        var value = settings.StateRoot;
         if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value))
-            throw new InvalidOperationException("Paths:StateRoot must expand to an absolute path.");
+            throw new InvalidOperationException("Paths:StateRoot must be an absolute path.");
         return Path.GetFullPath(value);
     }
 

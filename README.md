@@ -4,9 +4,9 @@ Pressroom is a standalone .NET 10 service that turns a complete HTML document in
 a PDF. It publishes as one IIS application folder, including its matching private
 Playwright driver, Node runtime, Chromium headless shell, and Noto Sans fonts.
 
-This is a separate solution. A suitable location on your machine is
-`C:\Users\steph\source\repos\Pressroom`. Nothing in this solution modifies
-`C:\Users\steph\source\repos\UmbracoAppHost`.
+Applications submit self-contained HTML over HTTP and receive PDF bytes. The
+optional `Pressroom.Client` library provides a .NET client without adding a browser
+dependency to the calling application.
 
 ## Publish from Visual Studio
 
@@ -61,8 +61,8 @@ for the host's shutdown/copy behavior.
 
 The build check runs on your publishing machine. The first Windows/IIS deployment
 still needs the acceptance checks in `docs/windows-acceptance.md`, particularly the
-application-pool identity, mixed authentication, and operation without Media
-Foundation. This source delivery does not claim that clean-Windows gate has run.
+application-pool identity, configured access mode, and operation without Media
+Foundation. The clean-Windows gate has not yet been run.
 
 ## One-time IIS setup
 
@@ -87,14 +87,12 @@ Configure the application in IIS Manager:
 | Idle Time-out | **0** for an always-warm renderer |
 | Application Preload | **True**, with Application Initialization installed |
 | Warm-up URL | `/v1/health` |
-| Authentication, mixed mode | Enable **Anonymous** and **Windows Authentication** |
+| Authentication | Enable **Anonymous Authentication**; disable **Windows Authentication** |
 | Site binding | HTTPS with your existing certificate/binding |
 
-Anonymous access lets an API-key request reach the application; endpoint
-authorization then chooses the key or Windows branch. An empty or invalid
-`X-Api-Key` never falls back to Windows authentication. Optional Windows group
-restrictions apply only to the Windows branch. See
-[ASP.NET Core Windows authentication](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/windowsauth?view=aspnetcore-10.0).
+IIS Anonymous Authentication lets requests reach Pressroom. The application then
+enforces its configured API-key or anonymous access mode. Pressroom does not use
+Windows authentication or domain-group restrictions.
 
 Keep runtime data outside the replaceable site folder:
 
@@ -112,18 +110,70 @@ Restrict the configuration file to that identity and administrators. Overlapped
 IIS recycling can temporarily run two application instances; each has its own
 browser and temporary directory, so budget memory for the overlap.
 
-Copy `samples/pressroom.settings.example.json` to the external configuration path
-and adjust it there. API keys are a dictionary of nonsecret identifier to randomly
-generated secret under `Auth:ApiKeys`; use at least 32 random bytes for a new key.
-The application enforces a minimum length of 16 characters. The sample contains
-no shared default key. To use keys alone, set `Auth:WindowsEnabled` to `false` and
-configure at least one key.
+### Application configuration and access
 
-Set the application-pool environment variable `PRESSROOM_CONFIG_FILE` if you want
-a different configuration file path. Environment overrides such as
-`Render__Concurrency` take precedence over the external file. Keep secrets out of
-`web.config`, published `appsettings.json`, and publish profiles. A missing
-explicitly selected external file is a startup error.
+Copy [`samples/pressroom.settings.example.json`](samples/pressroom.settings.example.json)
+to `C:\ProgramData\Pressroom\pressroom.settings.json` and adjust it there. The
+application reads packaged `appsettings.json` defaults, then the external JSON
+file. Settings are read at startup; restart the application after changes.
+
+To select a different external file, set `ConfigurationFile` in `appsettings.json`:
+
+```json
+{
+  "ConfigurationFile": "D:\\PressroomConfig\\pressroom.settings.json"
+}
+```
+
+A blank or omitted `ConfigurationFile` uses the operating system's common
+application-data folder, normally `C:\ProgramData\Pressroom\pressroom.settings.json`
+on Windows. Relative paths resolve from the application directory. An explicitly
+selected file must exist. For a local run or package check, `--config <path>` can
+select the file. Application settings do not use environment-variable overrides.
+
+The default `Auth:Mode` is `ApiKey`. Configure one or more valid keys in the external
+file under `Auth:ApiKeys`, mapping a nonsecret identifier to each secret:
+
+```json
+{
+  "Auth": {
+    "Mode": "ApiKey",
+    "ApiKeys": {
+      "reporting-app": "REPLACE_WITH_A_RANDOMLY_GENERATED_SECRET"
+    }
+  }
+}
+```
+
+Replace the illustrative value before use; the application ships without a key.
+Generate each secret from at least 32 random bytes. Key values must contain
+16–4096 characters and identifiers 1–128 characters. API-key mode fails startup
+when no keys are configured. Callers send a valid secret in `X-Api-Key`.
+
+To allow requests without credentials, explicitly select anonymous mode:
+
+```json
+{
+  "Auth": {
+    "Mode": "Anonymous",
+    "ApiKeys": {}
+  }
+}
+```
+
+Anonymous mode permits access to rendering, service information, and OpenAPI
+without a key. In either mode, a supplied invalid, empty, or duplicate `X-Api-Key`
+returns 401 on those endpoints. `/v1/health` always allows anonymous access.
+
+Keep real keys in the restricted external file, outside the published release and
+source control. Local `pressroom.settings.json` files are ignored by Git. Keep
+secrets out of `web.config`, packaged `appsettings.json`, and publish profiles.
+
+When upgrading an earlier configuration, remove `Auth:WindowsEnabled`,
+`Auth:RequireGroup`, and `Auth:AccessGroup`, then set `Auth:Mode` explicitly. Move
+environment overrides into the JSON file. If setting `Paths:StateRoot`, use a
+literal absolute path such as `C:\ProgramData\Pressroom`; `%ProgramData%` and other
+environment-variable placeholders are not expanded.
 
 The standard package aims to run without an additional machine-wide Visual C++
 redistributable or Media Foundation installation. It includes no arbitrary copies
@@ -136,10 +186,10 @@ in `docs/rendering-service-design.md`.
 
 | Endpoint | Authentication | Result |
 |---|---|---|
-| `POST /v1/render` | Windows or `X-Api-Key` | PDF with requested inline/attachment disposition; `X-Render-Pages` and `X-Render-Duration-Ms` |
+| `POST /v1/render` | Configured access mode | PDF with requested inline/attachment disposition; `X-Render-Pages` and `X-Render-Duration-Ms` |
 | `GET /v1/health` | Anonymous | Minimal readiness: 200 or 503 |
-| `GET /v1/info` | Windows or key | Versions, limits, active/queued counts, and packaged font inventory |
-| `GET /openapi/v1.json` | Windows or key | OpenAPI contract |
+| `GET /v1/info` | Configured access mode | Versions, limits, active/queued counts, and packaged font inventory |
+| `GET /openapi/v1.json` | Configured access mode | OpenAPI contract |
 
 Minimal request:
 
@@ -221,8 +271,8 @@ var pdf = await pressroom.RenderAsync(new RenderRequest
 For streaming, use `IPdfRenderer.RenderAsync(string html, RenderOptions options,
 CancellationToken)` and dispose the returned `PdfRenderResult` after copying its
 `PdfStream`. The request-object overload above is a buffered convenience API.
-Both result types retain the returned `Disposition`. If an application such as
-Umbraco calls Pressroom from its server, it must apply the chosen
+Both result types retain the returned `Disposition`. A calling web application
+must apply the chosen
 `Content-Disposition` to its own PDF response to the browser. Copying the bytes
 alone does not carry Pressroom's HTTP headers through that extra response. Use
 the web framework's typed header/file APIs for the mode and filename.
@@ -230,17 +280,15 @@ The caller controls the overall deadline and retry policy. The client does not
 retry automatically; `PressroomException` exposes the status and `Retry-After`
 information so the caller can select HTML fallback or an explicit bounded retry.
 
-For Windows credentials, construct the reusable client with an
-`HttpClientHandler { UseDefaultCredentials = true }` instead of adding a key. Keep
-the base address's trailing slash, for example `https://pressroom.example/`.
+For anonymous mode, omit the `X-Api-Key` header. Keep the base address's trailing
+slash, for example `https://pressroom.example/`. Store the caller's URL and key in
+its application configuration file.
 
-The calling application owns its HTML and configured URL. Its agreed behavior is
-to deliver HTML when running under localhost, when no Pressroom URL is configured,
-or when Pressroom is unavailable. That decision belongs in the caller; Pressroom
-continues to expose a rendering API and permits localhost development. A health
-probe before every render is unnecessary: use the render response/connection
-outcome within the caller's timeout policy. This solution makes no changes to
-UmbracoAppHost.
+The calling application owns its HTML, configured URL, and fallback behavior. It
+may deliver HTML when no Pressroom URL is configured or when Pressroom is
+unavailable. Pressroom also permits localhost development. A health probe before
+every render is unnecessary: use the render response or connection outcome within
+the caller's timeout policy.
 
 ## Build, tests, and development
 
@@ -260,27 +308,27 @@ and French text, all four packaged font styles, inline vector graphics, headings
 and page breaks. `samples/orders-bilingual.request.json` is ready to submit and
 requests inline preview; change its `disposition` to `attachment` for a download.
 
-For a local Windows development run outside Publish, first build the server and
-use the private driver from its output directory to provision the developer's
-browser folder once:
+For a local Windows run, publish the `IisFolder` profile to acquire and verify the
+matching browser, then run its executable with your local settings file:
 
 ```powershell
-$output = (Resolve-Path '.\src\Pressroom.Server\bin\Debug\net10.0').Path
-$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $output 'browsers'
-& "$output\.playwright\node\win32_x64\node.exe" `
-  "$output\.playwright\package\cli.js" install chromium --only-shell
+& '.\artifacts\publish\IisFolder\Pressroom.Server.exe' --config 'C:\PressroomConfig\pressroom.settings.json'
 ```
 
-Configure writable external state and either Windows authentication or your own
-development API key before running. The published executable's `--check` mode is
-also available for local diagnostics: it validates the real packaged renderer
-without listening on a port or installing anything.
+Configure a writable `Paths:StateRoot` outside the release folder and either your
+own API key or explicit anonymous mode. The published executable's `--check` mode
+is also available for local diagnostics: it validates the real packaged renderer
+without listening on a port or installing anything. Add `--config <path>` to use
+an explicit diagnostic configuration file. Playwright's internal process settings
+are supplied by the application and publish helper; no environment variables need
+to be configured for normal deployment or local use.
 
 Cross-platform implementation verification can explicitly set
 `PressroomBundleBrowser=false` for a development-only publish. That output lacks
 the automatic Windows browser bundle/check and is not a complete IIS release.
 
-See `docs/verification.md` for the checks performed on this source delivery,
-`docs/rendering-service-design.md` for the full design, and
-`docs/windows-acceptance.md` for the target-server qualification record. The
+See [`docs/verification.md`](docs/verification.md) for the verification record,
+[`docs/rendering-service-design.md`](docs/rendering-service-design.md) for the design,
+and [`docs/windows-acceptance.md`](docs/windows-acceptance.md) for the target-server
+qualification record. The
 application has no database, durable job queue, or separate worker service.

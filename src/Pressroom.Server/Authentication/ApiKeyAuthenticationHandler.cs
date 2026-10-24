@@ -20,7 +20,7 @@ public sealed class ApiKeyAuthenticationHandler(
         if (!Request.Headers.TryGetValue(AuthenticationNames.ApiKeyHeader, out var values))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        // Empty, duplicate and oversized headers select this branch and fail here, never Windows.
+        // A supplied key must be valid, even when anonymous access is enabled.
         if (values.Count != 1 || string.IsNullOrEmpty(values[0]) || values[0]!.Length > 4096)
             return Task.FromResult(AuthenticateResult.Fail("Invalid API key."));
 
@@ -48,7 +48,7 @@ public sealed class ApiKeyAuthenticationHandler(
     }
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties) =>
-        Problems.WriteAsync(Context, StatusCodes.Status401Unauthorized, "Authentication required", "Supply a valid API key or use the configured Windows authentication path.");
+        Problems.WriteAsync(Context, StatusCodes.Status401Unauthorized, "Authentication required", "Supply a valid X-Api-Key header.");
 
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) =>
         Problems.WriteAsync(Context, StatusCodes.Status403Forbidden, "Access denied", "The authenticated caller is not authorized.");

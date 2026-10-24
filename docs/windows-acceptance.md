@@ -58,22 +58,27 @@ Keep normal Playwright validation and `ChromiumSandbox=true` enabled.
 
 ## Real IIS authentication
 
-Use both a valid key and an authorized domain caller. Inspect status codes and
-`WWW-Authenticate` headers, not just browser sign-in behavior.
+Enable IIS Anonymous Authentication and disable Windows Authentication. Configure
+each access mode in the external JSON file and restart between modes. Inspect
+status codes and `WWW-Authenticate` headers.
 
-| Request | Expected |
+| Mode and request | Expected |
 |---|---|
-| Valid key, no Windows credentials | 200 on `/v1/info` and successful render |
-| Invalid key, Windows credentials available | 401; no Negotiate/NTLM challenge and no Windows fallback |
-| Present but empty key, Windows credentials available | Same failure as invalid key |
-| No key, authorized Windows caller | Success |
-| No key, anonymous caller with Windows mode enabled | Windows challenge / 401 |
-| Windows caller outside a required group | 403 |
-| Valid key with Windows group restriction enabled | Success; group restriction is Windows-only |
+| `ApiKey`: valid configured key | 200 on `/v1/info` and successful render |
+| `ApiKey`: missing key | 401, including callers with Windows credentials |
+| Either mode: invalid, empty, duplicate, or oversized key | 401; no Negotiate/NTLM challenge |
+| `Anonymous`: no key | Successful render, `/v1/info`, and OpenAPI access |
+| `Anonymous`: valid configured key | Success |
+| `ApiKey`: no keys configured | Startup fails with a configuration error |
 
-Verify `/v1/health` remains anonymous and `/v1/info` and OpenAPI remain protected.
-Windows-only browser tests or fake authentication in an API test host do not
-replace these cases.
+Verify `/v1/health` remains anonymous in both modes. Verify `/v1/info` and OpenAPI
+require a valid key in API-key mode. API tests with a controlled host do not
+replace these deployment checks.
+
+Change a rendering limit and a valid key in the external JSON file, restart, and
+confirm both changes take effect. Check that the application reads the file named
+by `ConfigurationFile`, fails startup for an explicitly selected missing file,
+and does not take application-setting overrides from environment variables.
 
 ## Limits, cancellation, and resources
 
@@ -108,7 +113,7 @@ worker processes or explicitly choose non-overlapped recycling.
 
 Publish an update using your normal Visual Studio profile, then restore the entire
 previous release using that same transport. Verify readiness, version identity,
-both auth branches, and a PDF after each operation. Keep configuration, logs, and
+the configured access mode, and a PDF after each operation. Keep configuration, logs, and
 temporary state outside the replaceable site directory. A partial file-copy or
 warm-up failure must not be treated as a successful deployment.
 

@@ -6,9 +6,13 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Pressroom.Contracts;
 using Pressroom.Rendering;
 using Pressroom.Server;
@@ -40,6 +44,10 @@ public sealed class ServerTests
         Assert.DoesNotContain(TestApplication.Secret, await info.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         using var document = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json", TestContext.Current.CancellationToken));
         Assert.Equal(2, document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("PageSize").GetProperty("oneOf").GetArrayLength());
+        var schemes = document.RootElement.GetProperty("components").GetProperty("securitySchemes");
+        Assert.Single(schemes.EnumerateObject());
+        Assert.Equal("apiKey", schemes.GetProperty("ApiKey").GetProperty("type").GetString());
+        Assert.Single(document.RootElement.GetProperty("security").EnumerateArray());
     }
 
     [Theory]
@@ -61,7 +69,7 @@ public sealed class ServerTests
     }
 
     [Fact]
-    public async Task ValidKeyBypassesNegotiateRequestHandlerWhenWindowsBranchIsEnabled()
+    public async Task ValidKeyIgnoresWindowsCredentials()
     {
         using var app = new TestApplication(preauthenticatedPrincipal: true);
         using var client = app.CreateAuthenticatedClient();
@@ -72,11 +80,100 @@ public sealed class ServerTests
     }
 
     [Fact]
-    public void WindowsSelectionDependsOnHeaderPresenceNotHeaderValidity()
+    public async Task WindowsPrincipalWithoutKeyCannotAuthorizeRequest()
     {
-        Assert.Equal(AuthenticationNames.ApiKey, AuthenticationNames.SelectScheme(true, true));
-        Assert.Equal(AuthenticationNames.ApiKey, AuthenticationNames.SelectScheme(false, false));
-        Assert.Equal("Negotiate", AuthenticationNames.SelectScheme(false, true));
+        using var app = new TestApplication(preauthenticatedPrincipal: true);
+        using var client = app.CreateClient();
+        using var response = await client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Empty(response.Headers.WwwAuthenticate);
+        Assert.Equal(0, app.Renderer.Calls);
+    }
+
+    [Fact]
+    public async Task AnonymousModeAllowsRequestsWithoutKeysAndDocumentsItsSecurity()
+    {
+        using var app = new TestApplication(authMode: AuthMode.Anonymous, configureKey: false);
+        using var client = app.CreateClient();
+        foreach (var path in new[] { "/v1/health", "/v1/info" })
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(path, TestContext.Current.CancellationToken)).StatusCode);
+        using var response = await client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(response.Headers.WwwAuthenticate);
+        using var document = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json", TestContext.Current.CancellationToken));
+        Assert.Empty(document.RootElement.GetProperty("security").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey, "")]
+    [InlineData(AuthMode.ApiKey, "wrong-key-with-enough-length")]
+    [InlineData(AuthMode.Anonymous, "")]
+    [InlineData(AuthMode.Anonymous, "wrong-key-with-enough-length")]
+    public async Task SuppliedInvalidKeyIsRejectedInEitherMode(AuthMode mode, string key)
+    {
+        using var app = new TestApplication(authMode: mode);
+        using var client = app.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JsonBody() };
+        request.Headers.TryAddWithoutValidation("X-Api-Key", key);
+        if (key.Length == 0)
+            request.Headers.Add("X-Test-Empty-Key", "1");
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Empty(response.Headers.WwwAuthenticate);
+        Assert.Equal(0, app.Renderer.Calls);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey)]
+    [InlineData(AuthMode.Anonymous)]
+    public async Task DuplicateKeysAreRejectedInEitherMode(AuthMode mode)
+    {
+        using var app = new TestApplication(authMode: mode);
+        using var client = app.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/render") { Content = JsonBody() };
+        request.Headers.TryAddWithoutValidation("X-Api-Key", new[] { TestApplication.Secret, TestApplication.Secret });
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(0, app.Renderer.Calls);
+    }
+
+    [Fact]
+    public async Task AnonymousModeAlsoAcceptsAConfiguredKey()
+    {
+        using var app = new TestApplication(authMode: AuthMode.Anonymous);
+        using var client = app.CreateAuthenticatedClient();
+        using var response = await client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(AuthMode.ApiKey)]
+    [InlineData(AuthMode.Anonymous)]
+    public async Task HealthRemainsAnonymousWhenAnInvalidKeyIsSupplied(AuthMode mode)
+    {
+        using var app = new TestApplication(authMode: mode);
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "wrong-key-with-enough-length");
+        using var response = await client.GetAsync("/v1/health", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(response.Headers.WwwAuthenticate);
+    }
+
+    [Theory]
+    [InlineData("WindowsEnabled")]
+    [InlineData("RequireGroup")]
+    [InlineData("AccessGroup")]
+    public void LegacyWindowsAuthenticationSettingsAreRejectedByProductionBinding(string setting)
+    {
+        using var app = new TestApplication();
+        using var client = app.CreateClient();
+        // Exercise the application's registered binder directly, before Main's startup
+        // exception handling can dispose the host and obscure the validation failure.
+        app.Services.GetRequiredService<IConfiguration>()["Auth:" + setting] = "true";
+        using var scope = app.Services.CreateScope();
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<AuthSettings>>().Value);
+        Assert.Contains(setting, exception.ToString());
     }
 
     [Fact]
@@ -270,7 +367,7 @@ public sealed class ServerTests
     }, JsonDefaults.Options), Encoding.UTF8, "application/json");
 }
 
-internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0)
+internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true)
     : WebApplicationFactory<Program>
 {
     public const string Secret = "a-test-only-secret-with-32-characters";
@@ -282,24 +379,31 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        Directory.CreateDirectory(_stateRoot);
+        var auth = new Dictionary<string, object>
+        {
+            ["Mode"] = authMode.ToString(),
+            ["ApiKeys"] = configureKey ? new Dictionary<string, string> { ["integration-test"] = Secret } : new Dictionary<string, string>()
+        };
+        var settingsPath = Path.Combine(_stateRoot, "pressroom.settings.json");
+        File.WriteAllText(settingsPath, JsonSerializer.Serialize(new { Auth = auth }));
+        builder.ConfigureAppConfiguration((_, configuration) =>
+        {
+            // Bind real JSON keys through production options while isolating the test host
+            // from any settings loaded from the developer's conventional external path.
+            configuration.Sources.Clear();
+            configuration.AddJsonFile(settingsPath, optional: false, reloadOnChange: false);
+        });
         builder.ConfigureServices(services =>
         {
+            // These tests exercise HTTP behavior, not log sinks. Avoid opening a process-wide
+            // Serilog file sink whose disposal can race the entry point's async shutdown.
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
             foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(BrowserLifecycleService)).ToArray())
                 services.Remove(descriptor);
-            // Simulate an IIS-supplied principal and enabled Windows policy on non-Windows TestServer.
-            // The HTTP tests verify that the key branch never invokes Negotiate; actual Windows
-            // handshakes/group resolution remain part of the IIS deployment acceptance gate.
-            if (preauthenticatedPrincipal)
-                foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ConfigurationValidationService)).ToArray())
-                    services.Remove(descriptor);
             services.RemoveAll<IHtmlRenderer>();
             services.AddSingleton<IHtmlRenderer>(Renderer);
-            services.PostConfigure<AuthSettings>(options =>
-            {
-                options.WindowsEnabled = preauthenticatedPrincipal;
-                options.ApiKeys = new() { ["integration-test"] = Secret };
-                options.RequireGroup = false;
-            });
             services.PostConfigure<PathsSettings>(options => options.StateRoot = _stateRoot);
             services.PostConfigure<RenderSettings>(options =>
             {
@@ -309,8 +413,7 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
                 options.DefaultTimeoutMs = 5000;
                 options.MaxTimeoutMs = 10000;
             });
-            if (preauthenticatedPrincipal || blockPdfWrites || bodyReadDelayMs != 0)
-                services.AddSingleton<IStartupFilter>(new TestStartupFilter(this, preauthenticatedPrincipal, blockPdfWrites, bodyReadDelayMs));
+            services.AddSingleton<IStartupFilter>(new TestStartupFilter(this, preauthenticatedPrincipal, blockPdfWrites, bodyReadDelayMs));
         });
     }
 
@@ -339,7 +442,7 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
                     context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "TEST\\member")], "Windows"));
                 // TestServer's HttpClient adapter drops zero-length request header values.
                 // Recreate the header dictionary seen by the real server for this edge case.
-                if (principal && context.Request.Headers.ContainsKey("X-Test-Empty-Key"))
+                if (context.Request.Headers.ContainsKey("X-Test-Empty-Key"))
                     context.Request.Headers[AuthenticationNames.ApiKeyHeader] = "";
                 if (blockWrites && context.Request.Path == "/v1/render")
                     context.Response.Body = new BlockingWriteStream(context.Response.Body, app.WriteEntered, app.WriteRelease);

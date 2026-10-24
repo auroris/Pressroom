@@ -11,16 +11,18 @@ public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOption
     public void Validate()
     {
         ValidateRenderSettings(render.Value);
-        var settings = auth.Value;
-        if (settings.WindowsEnabled && !OperatingSystem.IsWindows())
-            throw new InvalidOperationException("Auth:WindowsEnabled requires Windows. Configure API keys and set it to false on other operating systems.");
+        ValidateAuthSettings(auth.Value);
+        _ = ResolveStateRoot(paths.Value);
+    }
+
+    public static void ValidateAuthSettings(AuthSettings settings)
+    {
+        if (!Enum.IsDefined(settings.Mode))
+            throw new InvalidOperationException("Auth:Mode must be ApiKey or Anonymous.");
         if (settings.ApiKeys.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 128 || string.IsNullOrWhiteSpace(pair.Value) || pair.Value.Length is < 16 or > 4096))
             throw new InvalidOperationException("Auth:ApiKeys must contain named keys with 16–4096 characters; identifiers must be 1–128 characters.");
-        if (!settings.WindowsEnabled && settings.ApiKeys.Count == 0)
-            throw new InvalidOperationException("Configure at least one API key when Windows authentication is disabled.");
-        if (settings.RequireGroup && (!settings.WindowsEnabled || string.IsNullOrWhiteSpace(settings.AccessGroup)))
-            throw new InvalidOperationException("Auth:RequireGroup requires Windows authentication and Auth:AccessGroup.");
-        _ = ResolveStateRoot(paths.Value);
+        if (settings.Mode == AuthMode.ApiKey && settings.ApiKeys.Count == 0)
+            throw new InvalidOperationException("Configure at least one Auth:ApiKeys entry or explicitly set Auth:Mode to Anonymous.");
     }
 
     public static void ValidateRenderSettings(RenderSettings settings)

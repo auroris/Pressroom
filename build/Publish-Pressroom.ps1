@@ -53,6 +53,19 @@ function Require-File([string]$Path) {
     }
 }
 
+function Get-Sha256Hash([string]$Path) {
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $algorithm.Dispose()
+    }
+}
+
 $BuildDirectory = Get-FullDirectory $BuildDirectory
 $BundleDirectory = Get-FullDirectory $BundleDirectory
 $node = Join-Path $BuildDirectory '.playwright\node\win32_x64\node.exe'
@@ -97,6 +110,7 @@ if ($Mode -eq 'Prepare') {
     if ([string]::IsNullOrWhiteSpace($NuGetRoot)) {
         $NuGetRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget\packages'
     }
+    $NuGetRoot = [IO.Path]::GetFullPath($NuGetRoot)
     $noticeRoot = Join-Path $BundleDirectory 'notices'
     if (Test-Path -LiteralPath $noticeRoot) { Remove-Item -LiteralPath $noticeRoot -Recurse -Force }
     [IO.Directory]::CreateDirectory($noticeRoot) | Out-Null
@@ -159,27 +173,27 @@ Require-File (Join-Path $BuildDirectory '.playwright\package\LICENSE')
 if (!(Test-Path -LiteralPath $browserDirectory -PathType Container)) { throw 'The staged browser payload is missing.' }
 $checkRoot = Join-Path ([IO.Path]::GetTempPath()) ('Pressroom-publish-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($checkRoot) | Out-Null
-$emptyConfiguration = Join-Path $checkRoot 'pressroom.settings.json'
-[IO.File]::WriteAllText($emptyConfiguration, '{}', [Text.UTF8Encoding]::new($false))
+$checkConfiguration = Join-Path $checkRoot 'pressroom.settings.json'
+Write-Utf8Json $checkConfiguration ([ordered]@{
+    Paths = [ordered]@{ StateRoot = Join-Path $checkRoot 'state' }
+    Render = [ordered]@{
+        BrowsersPath = $browserDirectory
+        ChromiumPath = $null
+        ChromiumSandbox = $true
+    }
+    Fonts = [ordered]@{ Manifest = $fontManifest }
+    Auth = [ordered]@{ Mode = 'Anonymous'; ApiKeys = @{} }
+})
 $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = $executable
-$start.Arguments = '--check'
+$start.Arguments = '--check --config "' + $checkConfiguration + '"'
 $start.WorkingDirectory = $BuildDirectory
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
 $start.RedirectStandardOutput = $true
 $start.RedirectStandardError = $true
-foreach ($name in @($start.EnvironmentVariables.Keys)) {
-    if ($name -match '^(Render|Paths|Fonts|Auth)__') { $start.EnvironmentVariables.Remove($name) }
-}
-$start.EnvironmentVariables['ASPNETCORE_ENVIRONMENT'] = 'Production'
-$start.EnvironmentVariables['DOTNET_ENVIRONMENT'] = 'Production'
-$start.EnvironmentVariables['PRESSROOM_CONFIG_FILE'] = $emptyConfiguration
-$start.EnvironmentVariables['Paths__StateRoot'] = Join-Path $checkRoot 'state'
-$start.EnvironmentVariables['Render__BrowsersPath'] = $browserDirectory
-$start.EnvironmentVariables['Fonts__Manifest'] = $fontManifest
-$start.EnvironmentVariables['Render__ChromiumSandbox'] = 'true'
-$start.EnvironmentVariables.Remove('Render__ChromiumPath')
+# Application settings come only from JSON. Remove Playwright process controls
+# that could bypass dependency validation or select a different private driver.
 $start.EnvironmentVariables.Remove('PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS')
 $start.EnvironmentVariables.Remove('PLAYWRIGHT_NODEJS_PATH')
 $start.EnvironmentVariables.Remove('PLAYWRIGHT_DRIVER_SEARCH_PATH')
@@ -219,7 +233,7 @@ try {
         $relative = Get-RelativeFile $BuildDirectory $file.FullName
         # The Web SDK transforms web.config later for the selected transport/profile.
         if ($relative -eq 'web.config' -or $relative -eq 'release-manifest.json') { continue }
-        $files += [ordered]@{ path = $relative; bytes = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+        $files += [ordered]@{ path = $relative; bytes = $file.Length; sha256 = Get-Sha256Hash $file.FullName }
     }
     $nodeVersion = & $node --version
     if ($LASTEXITCODE -ne 0) { throw 'The packaged Node runtime failed its version check.' }

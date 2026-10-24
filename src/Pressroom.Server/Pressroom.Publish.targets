@@ -22,7 +22,8 @@
       <_PressroomPowerShell Condition="'$(_PressroomPowerShell)' == ''">$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe</_PressroomPowerShell>
     </PropertyGroup>
     <Message Text="Pressroom: preparing the version-matched Chromium headless shell for this publish." Importance="high" />
-    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Prepare -BuildDirectory &quot;$(_PressroomBuildDirectory)&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)&quot; -NuGetRoot &quot;$(NuGetPackageRoot)&quot; -SelfContained &quot;$(SelfContained)&quot;" />
+    <!-- A final dot keeps trailing directory separators from escaping quotes in native Windows arguments. -->
+    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Prepare -BuildDirectory &quot;$(_PressroomBuildDirectory)\.&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)\.&quot; -NuGetRoot &quot;$(NuGetPackageRoot)\.&quot; -SelfContained &quot;$(SelfContained)&quot;" />
   </Target>
 
   <Target Name="PressroomIncludeAndVerifyBrowserBundle"
@@ -43,7 +44,7 @@
     <Copy SourceFiles="@(ResolvedFileToPublish)"
           DestinationFiles="@(ResolvedFileToPublish->'$(_PressroomCheckDirectory)\%(RelativePath)')" />
     <Message Text="Pressroom: checking the complete published renderer before deployment." Importance="high" />
-    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Verify -BuildDirectory &quot;$(_PressroomCheckDirectory)&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)&quot; -NuGetRoot &quot;$(NuGetPackageRoot)&quot; -SelfContained &quot;$(SelfContained)&quot;" />
+    <Exec Command="&quot;$(_PressroomPowerShell)&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_PressroomPublishHelper)&quot; -Mode Verify -BuildDirectory &quot;$(_PressroomCheckDirectory)\.&quot; -BundleDirectory &quot;$(_PressroomBundleDirectory)\.&quot; -NuGetRoot &quot;$(NuGetPackageRoot)\.&quot; -SelfContained &quot;$(SelfContained)&quot;" />
     <ItemGroup>
       <ResolvedFileToPublish Include="$(_PressroomBundleDirectory)\release-manifest.json">
         <RelativePath>release-manifest.json</RelativePath>

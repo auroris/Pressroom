@@ -1,6 +1,5 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Server.IIS;
 using Microsoft.Extensions.Options;
 using Pressroom.Rendering;
@@ -69,26 +68,19 @@ public partial class Program
 
     internal static WebApplication CreateApplication(string[] args, bool check)
     {
+        var configurationFile = ApplicationConfiguration.GetConfigurationFile(args);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             Args = args,
             ContentRootPath = AppContext.BaseDirectory
         });
 
-        var selectedConfig = Environment.GetEnvironmentVariable("PRESSROOM_CONFIG_FILE");
-        var externalConfig = string.IsNullOrWhiteSpace(selectedConfig)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Pressroom", "pressroom.settings.json")
-            : Path.GetFullPath(Environment.ExpandEnvironmentVariables(selectedConfig));
-        // Secrets survive code replacement. Explicitly selected configuration must exist.
-        builder.Configuration.AddJsonFile(externalConfig, optional: string.IsNullOrWhiteSpace(selectedConfig), reloadOnChange: false);
-        builder.Configuration.AddEnvironmentVariables();
-        if (args.Length != 0)
-            builder.Configuration.AddCommandLine(args);
+        ApplicationConfiguration.Configure(builder.Configuration, AppContext.BaseDirectory, configurationFile);
 
         builder.Services.AddOptions<RenderSettings>().BindConfiguration("Render");
         builder.Services.AddOptions<PathsSettings>().BindConfiguration("Paths");
         builder.Services.AddOptions<FontsSettings>().BindConfiguration("Fonts");
-        builder.Services.AddOptions<AuthSettings>().BindConfiguration("Auth");
+        builder.Services.AddOptions<AuthSettings>().BindConfiguration("Auth", options => options.ErrorOnUnknownConfiguration = true);
         builder.Services.AddSingleton<ServerConfiguration>();
         if (!check)
             builder.Services.AddHostedService<ConfigurationValidationService>();
@@ -123,34 +115,21 @@ public partial class Program
                     outputTemplate: "{Timestamp:O} [{Level:u3}] {Message:lj}{NewLine}");
         });
 
-        builder.Services.AddAuthentication(options =>
-        {
-            options.DefaultScheme = AuthenticationNames.Selector;
-            options.DefaultChallengeScheme = AuthenticationNames.Selector;
-            options.DefaultForbidScheme = AuthenticationNames.Selector;
-        })
-            .AddPolicyScheme(AuthenticationNames.Selector, null, options =>
-            {
-                options.ForwardDefaultSelector = context => AuthenticationNames.SelectScheme(
-                    context.Request.Headers.ContainsKey(AuthenticationNames.ApiKeyHeader),
-                    context.RequestServices.GetRequiredService<IOptions<AuthSettings>>().Value.WindowsEnabled);
-            })
-            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(AuthenticationNames.ApiKey, null)
-            .AddNegotiate();
-        builder.Services.AddSingleton<IAuthenticationSchemeProvider, HeaderSelectedSchemeProvider>();
+        builder.Services.AddAuthentication(AuthenticationNames.ApiKey)
+            .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(AuthenticationNames.ApiKey, null);
 
         builder.Services.AddAuthorization(options =>
         {
-            var policy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(AuthenticationNames.Selector)
-                .RequireAuthenticatedUser()
+            var policy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(AuthenticationNames.ApiKey)
                 .RequireAssertion(context =>
                 {
-                    if (context.User.HasClaim(AuthenticationNames.BranchClaim, AuthenticationNames.ApiKey))
+                    if (context.User.Identity?.IsAuthenticated == true
+                        && context.User.HasClaim(AuthenticationNames.BranchClaim, AuthenticationNames.ApiKey))
                         return true;
                     var http = context.Resource as HttpContext;
                     var auth = http?.RequestServices.GetRequiredService<IOptions<AuthSettings>>().Value;
-                    return auth is { WindowsEnabled: true }
-                        && (!auth.RequireGroup || context.User.IsInRole(auth.AccessGroup!));
+                    return auth?.Mode == AuthMode.Anonymous
+                        && !http!.Request.Headers.ContainsKey(AuthenticationNames.ApiKeyHeader);
                 }).Build();
             options.DefaultPolicy = policy;
             options.FallbackPolicy = policy;
@@ -182,18 +161,6 @@ public partial class Program
                 else
                     await Problems.WriteAsync(context, 500, "Request failed", "The request could not be completed.");
             }
-        });
-        app.Use(async (context, next) =>
-        {
-            var authentication = context.RequestServices.GetRequiredService<IOptions<AuthSettings>>().Value;
-            if (!context.Request.Headers.ContainsKey(AuthenticationNames.ApiKeyHeader) && authentication.WindowsEnabled)
-            {
-                var handler = await context.RequestServices.GetRequiredService<IAuthenticationHandlerProvider>()
-                    .GetHandlerAsync(context, NegotiateDefaults.AuthenticationScheme);
-                if (handler is IAuthenticationRequestHandler requestHandler && await requestHandler.HandleRequestAsync())
-                    return;
-            }
-            await next(context);
         });
         app.UseAuthentication();
         app.UseAuthorization();

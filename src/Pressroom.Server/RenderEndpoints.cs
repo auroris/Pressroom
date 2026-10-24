@@ -2,10 +2,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using Pressroom.Contracts;
 using Pressroom.Rendering;
+using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
 
 namespace Pressroom.Server;
@@ -19,6 +21,12 @@ public static class RenderEndpoints
             ?? throw new InvalidOperationException("The embedded OpenAPI document is missing.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
+    });
+    private static readonly Lazy<string> AnonymousOpenApi = new(() =>
+    {
+        var document = JsonNode.Parse(OpenApi.Value)!;
+        document["security"] = new JsonArray();
+        return document.ToJsonString();
     });
 
     public static void Map(WebApplication app)
@@ -53,7 +61,8 @@ public static class RenderEndpoints
             });
         }).RequireAuthorization();
 
-        app.MapGet("/openapi/v1.json", () => Results.Content(OpenApi.Value, "application/json"))
+        app.MapGet("/openapi/v1.json", (IOptions<AuthSettings> auth) => Results.Content(
+            auth.Value.Mode == AuthMode.Anonymous ? AnonymousOpenApi.Value : OpenApi.Value, "application/json"))
             .RequireAuthorization();
 
         app.MapPost("/v1/render", HandleRenderAsync).RequireAuthorization();
