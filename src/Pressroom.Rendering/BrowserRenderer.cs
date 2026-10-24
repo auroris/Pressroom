@@ -218,10 +218,12 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
         }
     }
 
-    private async Task<RenderOutput> RenderDocumentAsync(IBrowserContext context, RenderRequest request, CancellationToken token)
+    private async Task<RenderOutput> RenderDocumentAsync(IBrowserContext context, RenderRequest request, CancellationToken token,
+        bool verifySandbox = false)
     {
         var blocked = 0;
         var pageError = 0;
+        var documentNavigated = 0;
         var documentSupplied = false;
         IPage? documentPage = null;
         await context.SetOfflineAsync(true);
@@ -242,7 +244,9 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
                         ["Content-Security-Policy"] = DocumentPolicy,
                         // Covers connections outside Playwright routing, including
                         // WebRTC/STUN/TURN, resource hints, and WebTransport.
-                        ["Connection-Allowlist"] = "();webrtc=block",
+                        // A local ReportingObserver checks enforcement during warm-up.
+                        // No Reporting-Endpoints header: reports never leave the browser.
+                        ["Connection-Allowlist"] = "();webrtc=block;report-to=pressroom-sandbox",
                         ["X-DNS-Prefetch-Control"] = "off",
                         ["Referrer-Policy"] = "no-referrer"
                     }
@@ -261,18 +265,40 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
             // Never call ConnectToServer: Playwright keeps this entirely in the context.
             Observe(socket.CloseAsync(new() { Code = 1008, Reason = "External connections are disabled." }));
         });
-        // CSP rejects resources before routing sees them. Keep only the count;
-        // request URLs and browser diagnostics may contain document secrets.
-        context.RequestFailed += (_, request) =>
-        {
-            if (request.Failure == "net::ERR_BLOCKED_BY_CSP") Interlocked.Increment(ref blocked);
-        };
         context.Page += (_, page) => page.PageError += (_, _) => Interlocked.Exchange(ref pageError, 1);
         var page = documentPage = await context.NewPageAsync();
+        // CSP rejects resources before routing and can omit RequestFailed events.
+        // Consume only the issue classification; never retain document URLs/text.
+        var audit = await context.NewCDPSessionAsync(page);
+        audit.Event("Audits.issueAdded").OnEvent += (_, payload) =>
+        {
+            if (payload is { } data && data.TryGetProperty("issue", out var issue)
+                && issue.GetProperty("code").GetString() == "ContentSecurityPolicyIssue"
+                && issue.GetProperty("details").TryGetProperty("contentSecurityPolicyIssueDetails", out var details)
+                && !details.GetProperty("isReportOnly").GetBoolean()
+                && details.GetProperty("contentSecurityPolicyViolationType").GetString() == "kURLViolation")
+                Interlocked.Increment(ref blocked);
+        };
+        await audit.SendAsync("Audits.enable");
+        // Local-scheme navigations (notably blob:) bypass request interception.
+        // They inherit our policies, but must never replace the submitted document.
+        page.FrameNavigated += (_, frame) =>
+        {
+            if (frame == page.MainFrame && frame.Url != DocumentUrl
+                && !frame.Url.StartsWith(DocumentUrl + "#", StringComparison.Ordinal))
+            {
+                Interlocked.Exchange(ref documentNavigated, 1);
+                Observe(page.CloseAsync());
+            }
+        };
         var options = request.Options!;
         await page.EmulateMediaAsync(new() { Media = options.Media == "screen" ? Media.Screen : Media.Print });
         await page.GotoAsync(DocumentUrl, new() { WaitUntil = WaitUntilState.Load, Timeout = 0 });
         token.ThrowIfCancellationRequested();
+        // The bootstrap navigation can replace Chromium's renderer process.
+        // Reapply media to the committed document before layout/readiness checks.
+        await page.EmulateMediaAsync(new() { Media = options.Media == "screen" ? Media.Screen : Media.Print });
+        if (verifySandbox) await VerifySandboxAsync(page, token);
         // Install packaged fonts in the loaded document as data-backed CSS.
         await page.AddStyleTagAsync(new() { Content = _fonts!.Css });
         await WaitForReadinessAsync(page, options.Readiness!, token);
@@ -282,12 +308,45 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
         token.ThrowIfCancellationRequested();
         var pdf = await BoundAsync(page.PdfAsync(MapPdfOptions(options, _settings.DefaultPageSize)), token);
         token.ThrowIfCancellationRequested();
+        if (Volatile.Read(ref documentNavigated) != 0)
+            throw new RenderDocumentException("The document navigated away from its isolated render context.");
         using var document = PdfDocument.Open(pdf);
         var pages = document.NumberOfPages;
         token.ThrowIfCancellationRequested();
         if (Volatile.Read(ref pageError) != 0)
             throw new RenderDocumentException("The document raised a JavaScript exception while printing.");
         return new(pdf, pages, Volatile.Read(ref blocked));
+    }
+
+    private static async Task VerifySandboxAsync(IPage page, CancellationToken token)
+    {
+        // Constructor-only probe: never gather ICE candidates or configure an external
+        // server. An ignored/unsupported header must fail startup, including overrides.
+        var enforced = await BoundAsync(page.EvaluateAsync<bool>("""
+            async () => {
+                let observer, connection, timeout;
+                try {
+                    return await new Promise(resolve => {
+                        timeout = setTimeout(() => resolve(false), 1000);
+                        observer = new ReportingObserver(reports => {
+                            if (reports.some(report => report.type === 'connection-allowlist'
+                                && report.body.connection === 'webrtc' && report.body.disposition === 'enforce'
+                                && report.body.allowlist.length === 0))
+                                resolve(true);
+                        }, { types: ['connection-allowlist'] });
+                        observer.observe();
+                        connection = new RTCPeerConnection();
+                    });
+                } catch { return false; }
+                finally {
+                    clearTimeout(timeout);
+                    observer?.disconnect();
+                    connection?.close();
+                }
+            }
+            """), token);
+        if (!enforced)
+            throw new InvalidOperationException("The browser does not enforce the required network sandbox. Use the packaged Chromium build.");
     }
 
     private static async Task WaitForReadinessAsync(IPage page, ReadinessOptions readiness, CancellationToken token)
@@ -447,7 +506,7 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
                 {
                     Html = "<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Pressroom warm-up</title></head><body style=\"font-family:'Noto Sans',sans-serif\"><h1>Pressroom</h1><p>Ready — prêt. Éé Àà Çç Œœ.</p></body></html>",
                     Options = new RenderOptions { DisplayHeaderFooter = false, JavaScript = false }
-                }, warmup.Token).WaitAsync(warmup.Token);
+                }, warmup.Token, verifySandbox: true).WaitAsync(warmup.Token);
                 if (rendered.PageCount != 1 || rendered.Pdf.Length < 100)
                     throw new InvalidOperationException("The browser warm-up did not produce a one-page PDF.");
             }

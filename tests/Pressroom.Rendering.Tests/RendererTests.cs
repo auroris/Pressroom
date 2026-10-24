@@ -120,6 +120,23 @@ public sealed class BrowserFixture : IAsyncLifetime
 public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixture<BrowserFixture>
 {
     [BrowserFact]
+    public async Task SandboxCapabilityCheckRejectsADocumentWithoutEnforcedConnectionPolicy()
+    {
+        await fixture.ReadyAsync();
+        var generation = typeof(BrowserRenderer).GetField("_generation", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(fixture.Renderer)!;
+        var browser = (IBrowser)generation.GetType().GetProperty("Browser")!.GetValue(generation)!;
+        await using var context = await browser.NewContextAsync(new() { Offline = true });
+        var page = await context.NewPageAsync();
+        // Simulate an older/overridden browser ignoring the header. The probe only
+        // constructs an RTC object; it never gathers candidates or contacts a server.
+        var verify = typeof(BrowserRenderer).GetMethod("VerifySandboxAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            (Task)verify.Invoke(null, [page, CancellationToken.None])!);
+        Assert.Contains("network sandbox", error.Message);
+    }
+
+    [BrowserFact]
     public async Task StaticBilingualDocumentHasEmbeddedFontTwoLetterPagesTagsOutlineAndPageNumbers()
     {
         var result = await fixture.RenderAsync("""
@@ -204,7 +221,7 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
             fetch('http://127.0.0.1:{{port}}/fetch').catch(() => {});
             window.open('http://127.0.0.1:{{port}}/popup');
             const ws = new WebSocket('ws://127.0.0.1:{{port}}/socket'); ws.onerror = () => {};
-            if (navigator.serviceWorker) navigator.serviceWorker.register('http://127.0.0.1:{{port}}/worker.js').catch(() => {});
+            try { if (navigator.serviceWorker) navigator.serviceWorker.register('http://127.0.0.1:{{port}}/worker.js').catch(() => {}); } catch {}
             </script></body></html>
             """, new() { Readiness = new() { DelayMs = 300 } });
         Assert.True(result.BlockedResources >= 5);

@@ -251,9 +251,15 @@ readiness conditions, and a bounded processing deadline. Static HTML needs no
 readiness flag. A chart may opt into
 `"readiness": { "function": "window.readyToPrint === true" }`.
 
-Documents must contain their own CSS and assets. Network and local-file resource
-requests, WebSockets, and service workers are blocked at the browser boundary.
-Inline/data-backed resources are supported. Use
+Documents must contain their own CSS and assets. Resource URLs are restricted to
+`data:`; network, local-file, and `blob:` resources are blocked. Inline JavaScript
+and CSS remain supported. Browser-enforced Content Security Policy and an empty
+Connection Allowlist apply before document parsing, including nested documents;
+the latter also blocks WebRTC, WebTransport, and speculative network connections.
+Offline contexts and request/WebSocket interception provide additional barriers.
+Workers, popups, forms, downloads, and origin-backed storage are disabled. Startup
+checks the browser's actual connection-policy enforcement and fails if it is
+unsupported, including for an executable override. Use
 `font-family: 'Noto Sans', sans-serif` for the bundled regular, bold, italic, and
 bold-italic faces; no Windows font installation is needed for those main-document
 fonts. Header/footer templates have separate styling and Chromium limitations;
@@ -276,6 +282,12 @@ contain metadata, never document bodies, API-key secrets, raw blocked URLs, or
 page error/console text. Chromium may create temporary files in its private
 working directory; this is not a promise of zero disk writes or OS-wide network
 isolation.
+
+The pinned Chromium build can reject printing of header/footer templates that
+attempt external loads. WebRTC attempts inside `srcdoc` or blank child frames can
+also crash the individual render under the connection policy. These cases return
+a content-free document error; the render context is closed and later renders
+remain usable. See the sandbox checks in `docs/verification.md`.
 
 ## Calling Pressroom
 

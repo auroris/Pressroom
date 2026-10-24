@@ -34,6 +34,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             </head><body><p id="styled">EMBEDDED_RESOURCES</p>
             <img id="embedded" width="40" height="40" src="{{png}}">
             <iframe src="{{frame}}"></iframe>
+            <iframe srcdoc="<p>INLINE_FRAME</p>"></iframe>
             <script>
             document.getElementById('styled').append(' INLINE_SCRIPT');
             fetch('data:text/plain,EMBEDDED_FETCH').then(response => response.text()).then(text => {
@@ -54,6 +55,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
         Assert.Contains("INLINE_SCRIPT", text);
         Assert.Contains("EMBEDDED_FETCH", text);
         Assert.Contains("EMBEDDED_FRAME", text);
+        Assert.Contains("INLINE_FRAME", text);
         Assert.Equal(0, result.BlockedResources);
     }
 
@@ -64,6 +66,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
         listener.Start();
         var origin = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
         var socket = origin.Replace("http:", "ws:", StringComparison.Ordinal);
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var child = $$"""
             <p>NESTED_ATTEMPTS</p><img src="{{origin}}/nested-image">
             <script>
@@ -71,6 +74,15 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             try { navigator.sendBeacon('{{origin}}/nested-beacon', 'probe'); } catch {}
             try { const ws = new WebSocket('{{socket}}/nested-socket'); ws.onerror = () => {}; } catch {}
             try { const popup = window.open('{{origin}}/nested-popup'); } catch {}
+            </script>
+            """;
+        var rtcChild = $$"""
+            <script>
+            try {
+                const rtc = new RTCPeerConnection({ iceServers: [{ urls: 'turn:127.0.0.1:{{port}}?transport=tcp', username: 'probe', credential: 'probe' }] });
+                window.turnProbe = rtc; rtc.createDataChannel('probe');
+                rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(() => {});
+            } catch {}
             </script>
             """;
         var result = await fixture.RenderAsync($$"""
@@ -83,6 +95,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             </head><body><p id="font">NETWORK_ATTEMPTS_FINISHED</p>
             <img src="{{origin}}/image"><iframe name="target" src="{{origin}}/frame"></iframe>
             <iframe src="{{DataUrl("text/html", child)}}"></iframe>
+            <iframe src="{{DataUrl("text/html", rtcChild)}}"></iframe>
             <iframe srcdoc="{{WebUtility.HtmlEncode(child)}}"></iframe>
             <object data="{{origin}}/object"></object><embed src="{{origin}}/embed">
             <video poster="{{origin}}/poster" src="{{origin}}/video" preload="auto"></video>
@@ -99,12 +112,17 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             try { new Worker('{{origin}}/worker'); } catch {}
             try { new SharedWorker('{{origin}}/shared-worker'); } catch {}
             try { navigator.serviceWorker?.register('{{origin}}/service-worker').catch(() => {}); } catch {}
+            try {
+                const rtc = new RTCPeerConnection({ iceServers: [{ urls: 'turn:127.0.0.1:{{port}}?transport=tcp', username: 'probe', credential: 'probe' }] });
+                window.turnProbe = rtc; rtc.createDataChannel('probe');
+                rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(() => {});
+            } catch {}
             window.attemptsFinished = true;
             </script></body></html>
             """, new()
             {
                 DisplayHeaderFooter = false,
-                Readiness = new() { Function = "window.attemptsFinished === true", DelayMs = 500 }
+                Readiness = new() { Function = "window.attemptsFinished === true", DelayMs = 1_000 }
             });
         Assert.False(listener.Pending(), "A document resource or connection reached the loopback TCP listener.");
         Assert.Contains("NETWORK_ATTEMPTS_FINISHED", PdfText(result.Pdf));
@@ -115,8 +133,19 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
     {
         using var listener = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         var port = ((IPEndPoint)listener.Client.LocalEndPoint!).Port;
+        var child = $$"""
+            <script>
+            try {
+                const rtc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:{{port}}' }] });
+                window.stunProbe = rtc; rtc.createDataChannel('probe');
+                rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(() => {});
+            } catch {}
+            </script>
+            """;
         var result = await fixture.RenderAsync($$"""
-            <p>UDP_ATTEMPTS_FINISHED</p><script>
+            <p>UDP_ATTEMPTS_FINISHED</p>
+            <iframe src="{{DataUrl("text/html", child)}}"></iframe>
+            <script>
             window.udpAttemptFinished = false;
             (async () => {
                 try {
@@ -234,19 +263,106 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
         var template = $$"""
             <style>@import url('{{origin}}/print-style'); .probe { background-image:url('{{origin}}/print-background'); }</style>
             <div class="probe" style="font-size:10px">PRINT_TEMPLATE
-            <img src="{{origin}}/print-image"><iframe src="{{origin}}/print-frame"></iframe></div>
+            <img src="{{origin}}/print-image"></div>
             """;
-        var result = await fixture.RenderAsync("<p>PRINT_BODY</p>", new()
+        RenderOutput? result = null;
+        try
         {
-            DisplayHeaderFooter = true,
-            HeaderTemplate = template,
-            FooterTemplate = template,
-            Margins = new() { Top = "1in", Bottom = "1in", Left = "1in", Right = "1in" }
-        });
+            result = await fixture.RenderAsync("<p>PRINT_BODY</p>", new()
+            {
+                DisplayHeaderFooter = true,
+                HeaderTemplate = template,
+                FooterTemplate = template,
+                Margins = new() { Top = "1in", Bottom = "1in", Left = "1in", Right = "1in" }
+            });
+        }
+        catch (RenderDocumentException)
+        {
+            // Chromium can reject printing templates with blocked external assets.
+            // Rejection is safe only if the attempted assets never reach the listener.
+        }
         Assert.False(listener.Pending(), "A print header or footer reached the loopback TCP listener.");
-        var text = PdfText(result.Pdf);
-        Assert.Contains("PRINT_BODY", text);
-        Assert.Contains("PRINT_TEMPLATE", text);
+        if (result is not null)
+        {
+            var text = PdfText(result.Pdf);
+            Assert.Contains("PRINT_BODY", text);
+            Assert.Contains("PRINT_TEMPLATE", text);
+        }
+        Assert.Equal(1, (await fixture.RenderAsync("<p>Template failure recovered</p>")).PageCount);
+    }
+
+    [BrowserFact]
+    public async Task SrcdocWebRtcIsDeniedWithoutTrafficAndRendererRemainsUsable()
+    {
+        using var tcp = new TcpListener(IPAddress.Loopback, 0);
+        tcp.Start();
+        using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var tcpPort = ((IPEndPoint)tcp.LocalEndpoint).Port;
+        var udpPort = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+        var child = $$"""
+            <script>
+            try {
+                const rtc = new RTCPeerConnection({ iceServers: [
+                    { urls:'stun:127.0.0.1:{{udpPort}}' },
+                    { urls:'turn:127.0.0.1:{{tcpPort}}?transport=tcp', username:'probe', credential:'probe' }
+                ] });
+                window.rtcProbe = rtc; rtc.createDataChannel('probe');
+                rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(() => {});
+            } catch {}
+            </script>
+            """;
+        // The pinned Chromium terminates this srcdoc renderer when denying RTC.
+        // Verify the failure remains contained and cannot grant network access.
+        await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync(
+            $"<p>SRCDOC_PROBE</p><iframe srcdoc=\"{WebUtility.HtmlEncode(child)}\"></iframe>",
+            new() { Readiness = new() { DelayMs = 1_500 } }));
+        Assert.False(tcp.Pending(), "A srcdoc WebRTC TURN attempt reached the TCP listener.");
+        Assert.Equal(0, udp.Available);
+        Assert.Equal(1, (await fixture.RenderAsync("<p>RTC failure recovered</p>")).PageCount);
+    }
+
+    [BrowserFact]
+    public async Task MainDocumentCannotReplaceItsPolicyWithABlobNavigation()
+    {
+        await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync("""
+            <p>ORIGINAL_DOCUMENT</p><script>
+            location.href = URL.createObjectURL(new Blob(['<p>REPLACEMENT_DOCUMENT</p>'], { type:'text/html' }));
+            </script>
+            """, new() { Readiness = new() { DelayMs = 200 } }));
+        Assert.Equal(1, (await fixture.RenderAsync("<p>Navigation rejection recovered</p>")).PageCount);
+    }
+
+    [BrowserFact]
+    public async Task OpaqueDocumentOriginCannotUsePersistentBrowserStorageOrFileSystem()
+    {
+        var result = await fixture.RenderAsync("""
+            <p id="status">STORAGE_PROBES_PENDING</p><script>
+            window.storageProbesFinished = false;
+            async function blocked(operation) {
+                try { await operation(); return false; } catch { return true; }
+            }
+            Promise.all([
+                blocked(() => localStorage.setItem('probe', 'value')),
+                blocked(() => sessionStorage.setItem('probe', 'value')),
+                blocked(() => new Promise((resolve, reject) => {
+                    const request = indexedDB.open('probe'); request.onsuccess = () => { request.result.close(); resolve(); };
+                    request.onerror = () => reject(request.error);
+                })),
+                blocked(() => caches.open('probe')),
+                blocked(() => navigator.storage.getDirectory())
+            ]).then(results => {
+                document.querySelector('#status').textContent = results.every(Boolean)
+                    ? 'PERSISTENT_STORAGE_BLOCKED' : 'PERSISTENT_STORAGE_ALLOWED';
+                window.storageProbesFinished = true;
+            });
+            </script>
+            """, new()
+            {
+                DisplayHeaderFooter = false,
+                Readiness = new() { Function = "window.storageProbesFinished === true" }
+            });
+        Assert.Contains("PERSISTENT_STORAGE_BLOCKED", PdfText(result.Pdf));
+        Assert.DoesNotContain("PERSISTENT_STORAGE_ALLOWED", PdfText(result.Pdf));
     }
 
     [BrowserFact]
