@@ -33,9 +33,14 @@ defaults:
 
 jobs:
   build:
-    name: Test and package Windows x64
+    name: Test, package, and release Windows x64
     runs-on: windows-2025
     timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      # Cache only this workflow's dependencies, not the runner's preinstalled packages.
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
       - name: Check out the selected commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,9 +67,13 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            src/**/packages.lock.json
+            tests/**/packages.lock.json
 
       - name: Restore locked dependencies
-        run: dotnet restore Pressroom.slnx --locked-mode "-p:Version=$env:RELEASE_VERSION"
+        run: dotnet restore Pressroom.slnx --locked-mode "-p:Version=$env:RELEASE_VERSION" -p:DisableImplicitNuGetFallbackFolder=true
 
       - name: Build
         run: dotnet build Pressroom.slnx -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
@@ -72,20 +81,14 @@ jobs:
       - name: Run tests
         run: dotnet test --solution Pressroom.slnx -c Release --no-build --no-restore
 
-      - name: Publish and verify both deployment packages
+      - name: Publish and verify the framework-dependent package
         run: |
-          $packages = @(
-            @{ Profile = 'IisFolder'; Variant = 'framework-dependent' },
-            @{ Profile = 'IisFolderSelfContained'; Variant = 'self-contained' }
-          )
-          foreach ($package in $packages) {
-            dotnet publish src/Pressroom.Server/Pressroom.Server.csproj -c Release `
-              "-p:PublishProfile=$($package.Profile)" "-p:Version=$env:RELEASE_VERSION" `
-              -p:ContinuousIntegrationBuild=true
-            if ($LASTEXITCODE -ne 0) { throw "Publish failed for $($package.Profile)." }
-            ./build/Package-Pressroom.ps1 -PublishDirectory "artifacts/publish/$($package.Profile)" `
-              -OutputDirectory artifacts/release -Version $env:RELEASE_VERSION -Variant $package.Variant
-          }
+          dotnet publish src/Pressroom.Server/Pressroom.Server.csproj -c Release --no-restore `
+            -p:PublishProfile=IisFolder "-p:Version=$env:RELEASE_VERSION" `
+            -p:ContinuousIntegrationBuild=true
+          if ($LASTEXITCODE -ne 0) { throw 'Publish failed for IisFolder.' }
+          ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/publish/IisFolder `
+            -OutputDirectory artifacts/release -Version $env:RELEASE_VERSION -Variant framework-dependent
 
       - name: Preserve release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -97,20 +100,8 @@ jobs:
           retention-days: 14
           overwrite: true
 
-  release:
-    name: Create GitHub release
-    needs: build
-    runs-on: windows-2025
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - name: Download verified packages
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-packages
-          path: release-assets
-
+      # Use the verified local files directly; transferring them to a second
+      # runner can take much longer than building and packaging the application.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,28 +119,24 @@ jobs:
             }
           }
 
-          $assets = @()
-          foreach ($variant in @('framework-dependent', 'self-contained')) {
-            $name = "Pressroom-$env:RELEASE_VERSION-win-x64-$variant.zip"
-            $archive = Join-Path release-assets $name
-            $checksum = $archive + '.sha256'
-            $expected = (Get-Content -LiteralPath $checksum -Raw).Trim()
-            $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($expected -cne "$actual  $name") { throw "Checksum mismatch for $name." }
-            $assets += $archive, $checksum
-          }
+          $name = "Pressroom-$env:RELEASE_VERSION-win-x64-framework-dependent.zip"
+          $archive = Join-Path artifacts/release $name
+          $checksum = $archive + '.sha256'
+          $expected = (Get-Content -LiteralPath $checksum -Raw).Trim()
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -cne "$actual  $name") { throw "Checksum mismatch for $name." }
+          $assets = @($archive, $checksum)
 
           $notes = @"
-          Windows x64 packages for Pressroom $env:RELEASE_VERSION, built from commit $env:GITHUB_SHA.
+          Windows x64 framework-dependent package for Pressroom $env:RELEASE_VERSION, built from commit $env:GITHUB_SHA.
 
-          - **framework-dependent**: requires the .NET 10 runtime on the server.
-          - **self-contained**: includes the .NET runtime.
-          - Both include Chromium, the private Playwright driver, fonts, and a release manifest.
-          - Both require the .NET 10 Hosting Bundle when hosted in IIS.
+          - Requires the .NET 10 runtime on the server.
+          - Includes Chromium, the private Playwright driver, fonts, and a release manifest.
+          - Requires the .NET 10 Hosting Bundle when hosted in IIS.
 
-          Extract the complete ZIP. Configure API keys or anonymous access in an external JSON file as described in README.md. Verify downloads using the accompanying SHA-256 files.
+          Extract the complete ZIP. Configure API keys or anonymous access in an external JSON file as described in README.md. Verify the download using the accompanying SHA-256 file.
 
-          Both packages passed the build-machine PDF warm-up. Target-server IIS acceptance remains a deployment check; see docs/windows-acceptance.md in the package.
+          The package passed the build-machine PDF warm-up. Target-server IIS acceptance remains a deployment check; see docs/windows-acceptance.md in the package.
           "@
           $notesPath = Join-Path $env:RUNNER_TEMP 'pressroom-release-notes.md'
           Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
@@ -166,4 +153,4 @@ jobs:
           if ($env:RELEASE_PRERELEASE -eq 'true' -or $env:RELEASE_VERSION.Contains('-')) { $arguments += '--prerelease' }
           gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. The verified assets remain in this workflow run.' }
-          "Created release $tag from commit $env:GITHUB_SHA with both Windows packages and SHA-256 files." >> $env:GITHUB_STEP_SUMMARY
+          "Created release $tag from commit $env:GITHUB_SHA with the framework-dependent Windows package and SHA-256 file." >> $env:GITHUB_STEP_SUMMARY

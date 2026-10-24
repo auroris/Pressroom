@@ -19,27 +19,29 @@ the repository's default branch:
    Versions with a suffix such as `-rc.1` are automatically marked as prereleases.
 
 The workflow restores locked dependencies, builds and tests the solution on
-Windows, and publishes both IIS profiles. Each publish must pass the real Chromium
-PDF warm-up before the workflow creates a release tagged `v<version>` at the exact
-commit selected when the run started. Existing tags and releases are never
-overwritten. If an interrupted upload leaves a draft or tag, inspect it before
-retrying with that version.
+Windows, and publishes the framework-dependent `IisFolder` profile. The publish
+must pass the real Chromium PDF warm-up before the workflow creates a release
+tagged `v<version>` at the exact commit selected when the run started. Existing tags
+and releases are never overwritten. If an interrupted upload leaves a draft or
+tag, inspect it before retrying with that version.
 
 Each release contains:
 
 - `Pressroom-<version>-win-x64-framework-dependent.zip`: requires .NET 10 on the server.
-- `Pressroom-<version>-win-x64-self-contained.zip`: includes the .NET runtime.
-- A `.zip.sha256` checksum file for each ZIP.
+- A `.zip.sha256` checksum file for the ZIP.
 
-Both ZIPs contain the complete application, private Playwright driver, Chromium,
+The ZIP contains the complete application, private Playwright driver, Chromium,
 fonts, and release manifest. Extract the entire archive; the `.playwright` folder
-is required. Both variants still require the .NET 10 Hosting Bundle for IIS.
+is required. The .NET 10 Hosting Bundle is required for IIS.
 Configure API keys or anonymous access in the external JSON file described below.
 Target-server acceptance remains a separate deployment check.
 
-The workflow uses GitHub's built-in token; no personal token or application secrets
-are required. Only the release job has repository write permission. Verified ZIPs
-are also retained as workflow artifacts for 14 days. See GitHub's
+The workflow caches NuGet packages using the committed dependency locks and creates
+the release directly from the verified files on the build runner, avoiding a
+second runner and an artifact download. It uses GitHub's built-in token; no personal
+token or application secrets are required. The job has repository write permission
+to create the tag and release; checkout does not persist credentials. The verified
+ZIP and checksum are also retained as workflow artifacts for 14 days. See GitHub's
 [manual workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 for the required repository access and default-branch setup.
 
