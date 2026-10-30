@@ -10,6 +10,7 @@ using Pressroom.Contracts;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Printing;
 
 namespace Pressroom.Server;
 
@@ -67,11 +68,21 @@ public static class RenderEndpoints
             .RequireAuthorization();
 
         app.MapPost("/v1/render", HandleRenderAsync).RequireAuthorization();
+
+        app.MapGet("/v1/printers", async (HttpContext context, IPrintService printing) =>
+        {
+            if (!(await context.AuthenticateAsync(AuthenticationNames.ApiKey)).Succeeded)
+            {
+                await context.ChallengeAsync(AuthenticationNames.ApiKey);
+                return;
+            }
+            await Results.Json(new { printers = printing.Printers }).ExecuteAsync(context);
+        }).RequireAuthorization();
     }
 
     private static async Task HandleRenderAsync(HttpContext context, IHtmlRenderer renderer,
         AdmissionGate admission, IOptions<RenderSettings> configured,
-        IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory)
+        IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory, IPrintService printing)
     {
         var settings = configured.Value;
         if (!HasSupportedContentType(context.Request))
@@ -107,6 +118,7 @@ public static class RenderEndpoints
         var pages = 0;
         var blocked = 0;
         long processingMilliseconds = 0;
+        var printingStarted = false;
         try
         {
             RenderRequest? request;
@@ -123,11 +135,17 @@ public static class RenderEndpoints
                 return;
             }
 
+            var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
+            if (request.Printer is not null && !authentication.Succeeded)
+            {
+                await context.ChallengeAsync(AuthenticationNames.ApiKey);
+                return;
+            }
+
             if (request.Options is { } suppliedOptions)
             {
                 // Permissions come only from the API-key handler, never an unrelated
                 // host identity. A request can disable scripts but cannot grant them.
-                var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
                 var javaScriptPermitted = authentication.Succeeded
                     && authentication.Principal?.HasClaim(AuthenticationNames.JavaScriptClaim, "true") == true;
                 request = request with
@@ -141,6 +159,9 @@ public static class RenderEndpoints
                 };
             }
             var errors = RequestValidator.Validate(request, settings.MaxTimeoutMs);
+            if (request.Printer is not null && !errors.ContainsKey("printer")
+                && !printing.Printers.Contains(request.Printer, StringComparer.OrdinalIgnoreCase))
+                errors["printer"] = ["Select a printer identifier configured in Printing:Printers."];
             if (errors.Count == 0)
             {
                 var effectiveOptions = request.Options!;
@@ -166,6 +187,16 @@ public static class RenderEndpoints
             deadline.Token.ThrowIfCancellationRequested();
             pages = output.PageCount;
             blocked = output.BlockedResources;
+
+            if (request.Printer is { } printer)
+            {
+                printingStarted = true;
+                var result = await printing.PrintAsync(printer, output, deadline.Token);
+                deadline.CancelAfter(Timeout.InfiniteTimeSpan);
+                await Results.Json(result, statusCode: StatusCodes.Status202Accepted).ExecuteAsync(context);
+                return;
+            }
+
             processingMilliseconds = (long)Stopwatch.GetElapsedTime(admittedAt).TotalMilliseconds;
 
             // The processing deadline excludes transfer time. RequestAborted still governs the response.
@@ -203,6 +234,16 @@ public static class RenderEndpoints
         {
             await UnavailableAsync(context);
         }
+        catch (PrintUnavailableException)
+        {
+            await Problems.WriteAsync(context, 503, "Printing unavailable",
+                "Check the Windows host, Printing:SumatraPdfPath, and the service identity's access to the executable and temporary directory.");
+        }
+        catch (PrintSubmissionException)
+        {
+            await Problems.WriteAsync(context, 502, "Print submission failed",
+                "The print helper reported a failure. Check the configured printer and its permissions. The job may have partially printed; check the Windows queue before retrying.");
+        }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
             context.Abort();
@@ -213,7 +254,9 @@ public static class RenderEndpoints
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
-            await Problems.WriteAsync(context, 504, "Render deadline expired", "The request exceeded its overall processing timeout.");
+            await Problems.WriteAsync(context, 504, printingStarted ? "Print deadline expired" : "Render deadline expired",
+                printingStarted ? "Print submission exceeded the processing timeout. A job may already be in the Windows queue; check it before retrying."
+                    : "The request exceeded its overall processing timeout.");
         }
         catch
         {

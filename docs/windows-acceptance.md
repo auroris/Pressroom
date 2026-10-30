@@ -90,6 +90,34 @@ confirm both changes take effect. Check that the application reads the file name
 by `ConfigurationFile`, fails startup for an explicitly selected missing file,
 and does not take application-setting overrides from environment variables.
 
+## Printer output
+
+For a desktop test, configure `Printing:SumatraPdfPath` to an installed or portable
+SumatraPDF executable and add `Printing:Printers:pdf-test` with the value
+`Microsoft Print to PDF`. Start Pressroom interactively with an API key. Submit
+`samples/orders-bilingual.request.json` with `"printer": "pdf-test"`, allowing
+enough processing time to complete the printer's **Save Print Output As** dialog.
+Save to an absolute path outside the temporary job directory. Expect 202 JSON,
+`status: submitted`, a correlation `jobId`, `printer: pdf-test`, and `pageCount: 2`.
+Inspect both pages of the saved output. The returned job ID is not a spooler ID,
+and the response does not confirm physical printing.
+
+On 2026-10-30, the local Windows test passed with SumatraPDF 3.6.1 and Microsoft
+Print to PDF. The user completed the save dialog, the API returned a two-page
+submission receipt, and the output was preserved under
+`artifacts/print-test/microsoft-print-to-pdf.pdf`. A nonexistent configured Windows
+printer returned 502, and an anonymous print request returned 401. This desktop
+test does not establish IIS identity or physical-printer acceptance.
+
+For production acceptance, repeat against an actual configured printer under the
+dedicated IIS identity, which needs print permission and access to SumatraPDF.
+Verify unavailable queues, denied permissions, cancellation, and request timeout;
+check that the helper exits and temporary input PDFs are removed. Queued pages may
+still print after a cancellation: inspect the Windows queue before retrying.
+Microsoft Print to PDF normally prompts for a filename and is unsuitable for
+unattended IIS use. Verify `GET /v1/printers` and print requests require a valid key
+even in anonymous mode, and that PDF-only requests continue to work.
+
 ## Limits, cancellation, and resources
 
 Exercise bodies near the 25 MiB application ceiling and above the 32 MiB host

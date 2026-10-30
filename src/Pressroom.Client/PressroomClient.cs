@@ -29,6 +29,8 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
     /// </summary>
     public async Task<PdfRenderResult> RenderStreamAsync(RenderRequest request, CancellationToken cancellationToken = default)
     {
+        if (request.Printer is not null)
+            throw new ArgumentException("Use PrintAsync for a request with a printer.", nameof(request));
         // The actual server may configure a maximum above the standard 60 seconds.
         var errors = RequestValidator.Validate(request, maxTimeoutMs: 300_000);
         if (errors.Count != 0)
@@ -64,6 +66,32 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
             response.Dispose();
             throw;
         }
+    }
+
+    /// <summary>Submits to a configured printer using the HttpClient's API key. Never retries automatically.</summary>
+    public async Task<PrintJobResult> PrintAsync(RenderRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.Printer is null)
+            throw new ArgumentException("A configured printer identifier is required.", nameof(request));
+        var errors = RequestValidator.Validate(request, maxTimeoutMs: 300_000);
+        if (errors.Count != 0)
+            throw new ArgumentException("Invalid print request: " + string.Join("; ", errors.Select(x => $"{x.Key}: {string.Join(", ", x.Value)}")), nameof(request));
+        using var message = new HttpRequestMessage(HttpMethod.Post, "v1/render")
+        {
+            Content = JsonContent.Create(request, options: JsonDefaults.Options)
+        };
+        message.Headers.Accept.ParseAdd("application/json");
+        using var response = await httpClient.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw await ReadFailureAsync(response, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.Accepted || response.Content.Headers.ContentType?.MediaType != "application/json")
+            throw new HttpRequestException("Pressroom returned an unexpected print response.");
+        await response.Content.LoadIntoBufferAsync(1024 * 1024, cancellationToken).ConfigureAwait(false);
+        var result = await response.Content.ReadFromJsonAsync<PrintJobResult>(JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
+        if (result is null || string.IsNullOrWhiteSpace(result.JobId) || result.Status != "submitted"
+            || !string.Equals(result.Printer, request.Printer, StringComparison.OrdinalIgnoreCase) || result.PageCount < 1)
+            throw new HttpRequestException("Pressroom returned an invalid print receipt.");
+        return result;
     }
 
     private static async Task<PressroomException> ReadFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)

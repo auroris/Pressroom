@@ -8,6 +8,9 @@ public static partial class RequestValidator
 {
     public static IReadOnlyList<string> NamedPageSizes { get; } = Array.AsReadOnly(["Letter", "Legal", "Tabloid", "A3", "A4", "A5"]);
 
+    public static bool IsPrinterIdentifier(string value) => value.Length is >= 1 and <= 128
+        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+
     public static Dictionary<string, string[]> Validate(RenderRequest request, int maxTimeoutMs = 60000)
     {
         var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
@@ -15,6 +18,8 @@ public static partial class RequestValidator
 
         if (string.IsNullOrWhiteSpace(request.Html)) Error("html", "A complete HTML document is required.");
         if (!Enum.IsDefined(request.Disposition)) Error("disposition", "Disposition must be inline or attachment.");
+        if (request.Printer is not null && !IsPrinterIdentifier(request.Printer))
+            Error("printer", "Use a configured printer identifier of 1–128 ASCII letters, digits, hyphens, or underscores.");
         if (request.Options is not { } options)
         {
             Error("options", "Options cannot be null; omit options to use the defaults.");

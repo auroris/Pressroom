@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Printing;
 using Xunit;
 
 namespace Pressroom.Server.Tests;
@@ -116,6 +117,26 @@ public sealed class ConfigurationTests : IDisposable
         Assert.False(auth.ApiKeys["caller"].AllowJavaScript);
         Assert.True(auth.ApiKeys["charts"].AllowJavaScript);
         ServerConfiguration.ValidateAuthSettings(auth);
+    }
+
+    [Fact]
+    public void PrintersBindFromAppsettingsAndExternalOverrides()
+    {
+        WriteJson("appsettings.json", new
+        {
+            Printing = new { SumatraPdfPath = Path.Combine(_directory, "SumatraPDF.exe"), Printers = new Dictionary<string, string> { ["office"] = "Old Printer" } }
+        });
+        WriteJson("selected.json", new
+        {
+            Printing = new { Printers = new Dictionary<string, string> { ["office"] = "Office Printer", ["pdf-test"] = "Microsoft Print to PDF" } }
+        });
+        using var configuration = new ConfigurationManager();
+        ApplicationConfiguration.Configure(configuration, _directory, "selected.json");
+        var printing = configuration.GetSection("Printing").Get<PrintingSettings>()!;
+        printing.Validate();
+        Assert.Equal("Office Printer", printing.Printers["office"]);
+        Assert.Equal("Microsoft Print to PDF", printing.Printers["pdf-test"]);
+        Assert.Equal(Path.Combine(_directory, "SumatraPDF.exe"), printing.SumatraPdfPath);
     }
 
     [Fact]

@@ -7,6 +7,9 @@ Playwright driver, Node runtime, Chromium headless shell, and Noto Sans fonts.
 Applications submit self-contained HTML over HTTP and receive PDF bytes. The
 optional `Pressroom.Client` library provides a .NET client without adding a browser
 dependency to the calling application.
+API-key callers can also submit documents to allowlisted Windows printers and
+receive a JSON submission receipt. Printer output requires a configured SumatraPDF
+executable on the server.
 
 ## Create a GitHub release
 
@@ -240,7 +243,8 @@ in `docs/rendering-service-design.md`.
 
 | Endpoint | Authentication | Result |
 |---|---|---|
-| `POST /v1/render` | Configured access mode | PDF with requested inline/attachment disposition; `X-Render-Pages` and `X-Render-Duration-Ms` |
+| `POST /v1/render` | Configured access mode; API key required when `printer` is supplied | PDF with requested disposition and render headers, or 202 JSON print submission receipt |
+| `GET /v1/printers` | API key required in every access mode | Configured printer identifiers |
 | `GET /v1/health` | Anonymous | Minimal readiness: 200 or 503 |
 | `GET /v1/info` | Configured access mode | Versions, limits, active/queued counts, and packaged font inventory |
 | `GET /openapi/v1.json` | Configured access mode | OpenAPI contract |
@@ -275,6 +279,89 @@ disable the key's permission, never grant it. A readiness function returns 400
 when JavaScript is effectively disabled. Existing script-dependent callers need
 `AllowJavaScript: true` on their key; their requests need no new flag.
 
+### Print to a Windows printer
+
+Install [SumatraPDF](https://www.sumatrapdfreader.org/free-pdf-reader) on the Windows
+server (the portable executable is also supported). This optional dependency is
+needed only for printer output and is not bundled with Pressroom. Configure its
+absolute path and an allowlist of printer identifiers in `appsettings.json` or
+the external settings file, then restart Pressroom:
+
+```json
+{
+  "Printing": {
+    "SumatraPdfPath": "C:\\Tools\\SumatraPDF\\SumatraPDF.exe",
+    "Printers": {
+      "shipping": "Warehouse Laser Printer",
+      "pdf-test": "Microsoft Print to PDF"
+    }
+  }
+}
+```
+
+Each value is the exact name of a Windows printer installed and accessible to the
+service's identity. Identifiers accept 1–128 ASCII letters, digits, underscores,
+and hyphens and are matched ignoring case. No printer is enabled by default.
+Grant the IIS application-pool identity execute access to SumatraPDF, print access
+to the selected queues, and Modify access to the `temp` directory under
+`Paths:StateRoot`. Printers installed only for an interactive user may not be
+available to IIS. Configure
+paper, tray, duplex, and other device defaults on the Windows printer; the PDF's
+render options control its content, and SumatraPDF uses the printer's settings to
+place it on paper. Qualify the output on the intended printer.
+
+Send a valid `X-Api-Key` and add `printer` to the normal render request:
+
+```json
+{
+  "html": "<!doctype html><html><body><h1>Shipping document</h1></body></html>",
+  "printer": "shipping"
+}
+```
+
+Every valid configured API key can print. Anonymous callers cannot print or list
+printers, even with `Auth:Mode` set to `Anonymous`. `GET /v1/printers` returns
+`{"printers":["pdf-test","shipping"]}` to authenticated callers; it lists the
+allowlist, not live queue health. Unknown identifiers return 400 before rendering.
+Missing or invalid credentials return 401. Omitting `printer` or using `null`
+preserves the existing PDF response. `fileName` and `disposition` have no effect
+on printer output.
+
+Pressroom renders through Chromium, temporarily writes the PDF in a private job
+directory under `Paths:StateRoot\temp`, and invokes SumatraPDF's
+[`-print-to` command](https://www.sumatrapdfreader.org/docs/Command-line-arguments).
+After the helper reports success, the response is **202 application/json**:
+
+```json
+{
+  "jobId": "64e5b7e07c8e4bdb86521bed5cd54d4c",
+  "printer": "shipping",
+  "status": "submitted",
+  "pageCount": 1
+}
+```
+
+`submitted` means the helper accepted submission to Windows, not that paper has
+finished printing. `jobId` is a Pressroom correlation ID and the temporary PDF's
+basename, not a Windows spooler job ID. There is no status polling endpoint.
+Offline devices or later spooler errors are managed through the Windows queue.
+The normal admission limit and processing timeout cover rendering and submission.
+The helper is stopped on cancellation or timeout, and temporary files are cleaned
+up after it exits. The Windows spooler can retain document data independently.
+
+Printer errors return `application/problem+json`: 502 for a helper-reported
+submission failure, 503 when the helper or its local resources are unavailable,
+and 504 for a processing timeout. A timeout, disconnect, or failure can occur
+after some or all pages reached the spooler. **Check the queue before retrying**;
+Pressroom does not deduplicate or automatically retry print requests.
+
+For a local interactive test, select `pdf-test` and complete Microsoft Print to
+PDF's **Save Print Output As** dialog before the request timeout. That virtual
+printer normally prompts for a destination file, so it is a manual test target,
+not an unattended IIS destination. See `docs/windows-acceptance.md` for the test.
+
+### Rendering behavior and limits
+
 Documents must contain their own CSS and assets. Resource URLs are restricted to
 `data:`; network, local-file, and `blob:` resources are blocked. Inline CSS remains
 supported; inline and data-backed scripts require JavaScript permission and an
@@ -302,7 +389,8 @@ not accumulate unlimited buffered PDFs. Saturation returns 429 while readiness
 can remain healthy. Readiness/page execution failure is 422, renderer replacement
 is 503, and the overall processing timeout is 504.
 
-Input HTML and generated PDFs are not deliberately stored by the server. Logs
+PDF-only requests do not deliberately store input HTML or generated PDFs. Printer
+requests temporarily store the generated PDF as described above. Logs
 contain metadata, never document bodies, API-key secrets, raw blocked URLs, or
 page error/console text. Chromium may create temporary files in its private
 working directory; this is not a promise of zero disk writes or OS-wide network
@@ -351,6 +439,21 @@ the web framework's typed header/file APIs for the mode and filename.
 The caller controls the overall deadline and retry policy. The client does not
 retry automatically; `PressroomException` exposes the status and `Retry-After`
 information so the caller can select HTML fallback or an explicit bounded retry.
+
+For printer output, call `PrintAsync` with the same API-key-configured client:
+
+```csharp
+var job = await pressroom.PrintAsync(new RenderRequest
+{
+    Html = completeHtml,
+    Printer = "shipping"
+}, cancellationToken);
+// job.Status == "submitted"; job.JobId identifies this submission.
+```
+
+The PDF-returning client methods reject requests containing a printer before
+sending them. `PrintAsync` returns `PrintJobResult` or throws `PressroomException`
+for a server error; it never retries a print job automatically.
 
 For anonymous mode, omit the `X-Api-Key` header. Keep the base address's trailing
 slash, for example `https://pressroom.example/`. Store the caller's URL and key in

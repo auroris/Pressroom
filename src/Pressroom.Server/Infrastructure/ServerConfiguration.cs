@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Options;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
+using Pressroom.Server.Printing;
 
 namespace Pressroom.Server.Infrastructure;
 
-public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOptions<AuthSettings> auth, IOptions<PathsSettings> paths)
+public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOptions<AuthSettings> auth, IOptions<PathsSettings> paths,
+    IOptions<PrintingSettings> printing)
 {
     public const long OuterBodyLimit = 32 * 1024 * 1024;
 
@@ -12,6 +14,7 @@ public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOption
     {
         ValidateRenderSettings(render.Value);
         ValidateAuthSettings(auth.Value);
+        printing.Value.Validate();
         _ = ResolveStateRoot(paths.Value);
     }
 

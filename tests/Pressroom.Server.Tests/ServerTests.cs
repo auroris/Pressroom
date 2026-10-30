@@ -18,6 +18,7 @@ using Pressroom.Rendering;
 using Pressroom.Server;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Printing;
 using Xunit;
 
 [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
@@ -475,6 +476,7 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
     public const string StaticSecret = "a-static-test-key-without-javascript-permission";
     private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "pressroom-tests", Guid.NewGuid().ToString("N"));
     public FakeRenderer Renderer { get; } = new();
+    public FakePrintService Printing { get; } = new();
     public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource WriteRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -510,6 +512,8 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
                 services.Remove(descriptor);
             services.RemoveAll<IHtmlRenderer>();
             services.AddSingleton<IHtmlRenderer>(Renderer);
+            services.RemoveAll<IPrintService>();
+            services.AddSingleton<IPrintService>(Printing);
             services.PostConfigure<PathsSettings>(options => options.StateRoot = _stateRoot);
             services.PostConfigure<RenderSettings>(options =>
             {

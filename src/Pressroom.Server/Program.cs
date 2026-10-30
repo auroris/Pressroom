@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Printing;
 using Serilog;
 using Serilog.Events;
 
@@ -81,6 +82,7 @@ public partial class Program
         builder.Services.AddOptions<PathsSettings>().BindConfiguration("Paths");
         builder.Services.AddOptions<FontsSettings>().BindConfiguration("Fonts");
         builder.Services.AddOptions<AuthSettings>().BindConfiguration("Auth", options => options.ErrorOnUnknownConfiguration = true);
+        builder.Services.AddOptions<PrintingSettings>().BindConfiguration("Printing", options => options.ErrorOnUnknownConfiguration = true);
         builder.Services.AddSingleton<ServerConfiguration>();
         if (!check)
             builder.Services.AddHostedService<ConfigurationValidationService>();
@@ -136,6 +138,8 @@ public partial class Program
         });
 
         builder.Services.AddSingleton<AdmissionGate>();
+        builder.Services.AddSingleton<IPrintProcessRunner, PrintProcessRunner>();
+        builder.Services.AddSingleton<IPrintService, PrintService>();
         builder.Services.AddSingleton<BrowserRenderer>();
         builder.Services.AddSingleton<IHtmlRenderer>(services => services.GetRequiredService<BrowserRenderer>());
         builder.Services.AddHostedService<BrowserLifecycleService>();

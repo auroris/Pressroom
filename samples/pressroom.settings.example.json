@@ -6,6 +6,10 @@
     "Mode": "ApiKey",
     "ApiKeys": {}
   },
+  "Printing": {
+    "SumatraPdfPath": "",
+    "Printers": {}
+  },
   "Render": {
     "Concurrency": 2,
     "QueueLimit": 8,

@@ -14,7 +14,7 @@
     "/v1/render": {
       "post": {
         "operationId": "render",
-        "summary": "Render self-contained HTML to PDF",
+        "summary": "Render self-contained HTML to PDF or submit it to a configured printer",
         "requestBody": {
           "required": true,
           "content": {
@@ -51,6 +51,16 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Submitted to the configured Windows printer; physical completion is not tracked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintJobResult"
                 }
               }
             }
@@ -133,8 +143,18 @@
               }
             }
           },
+          "502": {
+            "description": "Print helper reported failure. Check the Windows queue before retrying; partial printing is possible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "503": {
-            "description": "Browser unavailable or host draining",
+            "description": "Browser unavailable, host draining, or printing helper unavailable. Printing failures do not include Retry-After.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -161,7 +181,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Omit printer to receive PDF bytes. A printer identifier requires a valid X-Api-Key even in anonymous mode and returns a JSON submission receipt. Submission is not confirmation of physical printing. Never retry printing automatically after an ambiguous failure or timeout."
       }
     },
     "/v1/health": {
@@ -238,6 +259,51 @@
           },
           "403": {
             "description": "Access denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/printers": {
+      "get": {
+        "operationId": "printers",
+        "summary": "List configured printer identifiers",
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "description": "Always requires a valid API key, including in anonymous mode. Lists configuration, not live printer availability.",
+        "responses": {
+          "200": {
+            "description": "Configured identifiers only; Windows printer names and executable paths are not exposed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "printers"
+                  ],
+                  "properties": {
+                    "printers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -476,6 +542,42 @@
             ],
             "default": "attachment",
             "description": "Controls the PDF Content-Disposition header: inline asks the browser to display the PDF; attachment asks it to download the file. The browser and caller application retain control of the final presentation."
+          },
+          "printer": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "Identifier from Printing:Printers (case-insensitive). Requires a valid API key in every access mode. Omit or use null for PDF output. fileName and disposition do not affect printing."
+          }
+        }
+      },
+      "PrintJobResult": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "printer",
+          "status",
+          "pageCount"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Pressroom submission correlation ID, not a Windows spooler job ID. No status polling endpoint is provided."
+          },
+          "printer": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted"
+            ]
+          },
+          "pageCount": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       }

@@ -8,8 +8,13 @@ public sealed record RenderRequest
     public string Html { get; init; } = "";
     public string? FileName { get; init; } = "document.pdf";
     public PdfDisposition Disposition { get; init; } = PdfDisposition.Attachment;
+    /// <summary>Configured printer identifier. Null returns a PDF; printing requires a valid API key.</summary>
+    public string? Printer { get; init; }
     public RenderOptions? Options { get; init; } = new();
 }
+
+/// <summary>Submission receipt, not confirmation of physical printing or a Windows spooler job ID.</summary>
+public sealed record PrintJobResult(string JobId, string Printer, string Status, int PageCount);
 
 [JsonConverter(typeof(PdfDispositionJsonConverter))]
 public enum PdfDisposition

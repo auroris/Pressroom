@@ -8,6 +8,63 @@ namespace Pressroom.Contracts.Tests;
 public sealed class ClientTests
 {
     [Fact]
+    public async Task PrintSendsPrinterAndReadsSubmissionReceipt()
+    {
+        using var http = CreateClient(async (request, cancellation) =>
+        {
+            Assert.Equal("https://example.invalid/pressroom/v1/render", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("application/json", Assert.Single(request.Headers.Accept).MediaType);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellation));
+            Assert.Equal("office", body.RootElement.GetProperty("printer").GetString());
+            return new HttpResponseMessage(HttpStatusCode.Accepted)
+            {
+                Content = new StringContent("""{"jobId":"job-1","printer":"office","status":"submitted","pageCount":2}""", Encoding.UTF8, "application/json")
+            };
+        });
+        var result = await new PressroomClient(http).PrintAsync(new() { Html = "<p>Print</p>", Printer = "office" }, TestContext.Current.CancellationToken);
+        Assert.Equal(new PrintJobResult("job-1", "office", "submitted", 2), result);
+    }
+
+    [Fact]
+    public async Task PdfMethodsRejectPrinterBeforeAnyRequestAndPrintRequiresPrinter()
+    {
+        using var http = CreateClient((_, _) => throw new InvalidOperationException("No request should be sent."));
+        var client = new PressroomClient(http);
+        await Assert.ThrowsAsync<ArgumentException>(() => client.RenderAsync(new() { Html = "test", Printer = "office" }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.RenderStreamAsync(new() { Html = "test", Printer = "office" }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.PrintAsync(new() { Html = "test" }, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.PrintAsync(new() { Html = "test", Printer = "" }, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PrintFailuresArePreservedAndNeverRetried()
+    {
+        var calls = 0;
+        using var http = CreateClient((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent("""{"title":"Print submission failed","detail":"Check the queue before retrying."}""", Encoding.UTF8, "application/problem+json")
+            });
+        });
+        var error = await Assert.ThrowsAsync<PressroomException>(() => new PressroomClient(http).PrintAsync(new() { Html = "test", Printer = "office" }, TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.BadGateway, error.StatusCode);
+        Assert.Equal("Check the queue before retrying.", error.Detail);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task PrintRejectsPdfResponse()
+    {
+        using var http = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("%PDF", Encoding.ASCII, "application/pdf")
+        }));
+        await Assert.ThrowsAsync<HttpRequestException>(() => new PressroomClient(http).PrintAsync(new() { Html = "test", Printer = "office" }, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task StreamingInterfaceLeavesPdfUnreadAndOwnsItsLifetime()
     {
         var stream = new TrackingStream("%PDF-stream"u8.ToArray());
