@@ -134,7 +134,7 @@ jobs:
           - Includes Chromium, the private Playwright driver, fonts, and a release manifest.
           - Requires the .NET 10 Hosting Bundle when hosted in IIS.
 
-          Extract the complete ZIP. Configure API keys or anonymous access in an external JSON file as described in README.md. Verify the download using the accompanying SHA-256 file.
+          Extract the complete ZIP. Configure API keys or anonymous access in an external JSON file as described in docs/getting-started.md and docs/configuration.md in the package. Verify the download using the accompanying SHA-256 file.
 
           The package passed the build-machine PDF warm-up. Target-server IIS acceptance remains a deployment check; see docs/windows-acceptance.md in the package.
           "@

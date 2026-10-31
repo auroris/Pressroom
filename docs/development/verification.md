@@ -46,7 +46,7 @@ the bundled Chromium 156.0.8078.4, completed the PDF warm-up with sandboxing and
 dependency validation enabled, and produced the release manifest. The publish
 helper's Windows path quoting and SHA-256 hashing were corrected during this check.
 The self-contained profile and a clean IIS deployment were not exercised in this
-run. Use `windows-acceptance.md` for target-server qualification.
+run. Use [`windows-acceptance.md`](../windows-acceptance.md) for target-server qualification.
 
 ## Historical Linux verification
 
@@ -115,4 +115,4 @@ the qualified, complete IIS release.
 No Windows executable, IIS app-pool identity, Windows Job Object/nested-job
 execution, or Visual Studio UI was run in that verification. The
 clean-server Media Foundation/VC-runtime objective and full publish/IIS workflow
-remain the checks in `windows-acceptance.md`.
+remain the checks in [`windows-acceptance.md`](../windows-acceptance.md).

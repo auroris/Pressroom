@@ -1,6 +1,6 @@
 # Pressroom: HTML-to-PDF rendering service
 
-Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the README](../README.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
+Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the Developing guide](../developing.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
 
 Pressroom provides HTML-to-PDF rendering as a standalone service. Any application that can produce a self-contained HTML document can submit it and receive a PDF. Calling applications remain responsible for their templates and access checks.
 
@@ -262,7 +262,7 @@ The default framework-dependent profile targets `net10.0`, `win-x64`, with singl
 
 The publish helper copies supplied managed package notices, records versions and SHA-256 hashes, and removes only `DEPENDENCIES_VALIDATED` markers. It leaves `web.config` out of file hashes because the Web SDK transforms that file for the chosen profile after payload computation. Preserve `INSTALLATION_COMPLETE` and every installer-selected companion file.
 
-The production startup path never calls the installer. A successful publishing-machine check does not replace clean Windows/IIS qualification with the actual pool identity. See `../README.md` for the current workflow and `windows-acceptance.md` for the release gate.
+The production startup path never calls the installer. A successful publishing-machine check does not replace clean Windows/IIS qualification with the actual pool identity. See [the Developing guide](../developing.md) for the current workflow and [the acceptance record](../windows-acceptance.md) for the release gate.
 
 ### 8.3 Paths and startup
 
