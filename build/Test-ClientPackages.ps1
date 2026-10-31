@@ -1,6 +1,8 @@
 #requires -Version 7.0
+[CmdletBinding(DefaultParameterSetName = 'Render')]
 param(
-    [Parameter(Mandatory)][uri]$ServerUrl,
+    [Parameter(Mandatory, ParameterSetName = 'Render')][uri]$ServerUrl,
+    [Parameter(Mandatory, ParameterSetName = 'Compile')][switch]$BuildOnly,
     [string]$Feed = 'artifacts/nuget',
     [string]$Version = '0.1.0',
     [string]$Net8Dotnet = 'dotnet'
@@ -9,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $feedPath = (Resolve-Path $Feed).Path
 $smokeRoot = Join-Path $PSScriptRoot ('../artifacts/package-smoke/' + [Guid]::NewGuid().ToString('N'))
 # The destination must be an anonymous local test server; no keys are placed on command lines.
-if (!$ServerUrl.IsLoopback) { throw 'Use a loopback test server for this package smoke check.' }
+if (!$BuildOnly -and !$ServerUrl.IsLoopback) { throw 'Use a loopback test server for this package smoke check.' }
 New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
 $nugetConfig = Join-Path $smokeRoot NuGet.Config
 $escapedFeed = [Security.SecurityElement]::Escape($feedPath)
@@ -59,6 +61,10 @@ Console.WriteLine($"Consumer {System.Runtime.InteropServices.RuntimeInformation.
 '@ | Set-Content (Join-Path $directory Program.cs)
     dotnet build $project -c Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Consumer build failed.' }
+    if ($BuildOnly) {
+        Write-Host "Consumer $framework compiled against the locally packed client and contracts."
+        continue
+    }
     $dll = Join-Path $directory "bin/Release/$framework/$([IO.Path]::GetFileNameWithoutExtension($project)).dll"
     $runtime = if ($framework -eq 'net8.0') { $Net8Dotnet } else { 'dotnet' }
     & $runtime $dll --Pressroom:Url $ServerUrl.AbsoluteUri

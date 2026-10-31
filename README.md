@@ -112,10 +112,11 @@ curl -sS -X POST http://localhost:5177/v1/render \
   --data-binary @samples/orders-bilingual.request.json -o orders.pdf
 ```
 
-Or from .NET 8 or .NET 10:
+Or from .NET 8 or .NET 10. Download the GitHub workflow's `nuget-packages`
+artifact into a local feed first; see [client installation](docs/client.md#installing-the-package):
 
 ```sh
-dotnet add package Pressroom.Client
+dotnet add package Pressroom.Client --version <version> --source ./packages
 ```
 
 ```csharp

@@ -1,5 +1,5 @@
-name: Release
-run-name: Release v${{ inputs.version }} from ${{ github.ref_name }}
+name: Packages
+run-name: Packages v${{ inputs.version }} from ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -9,15 +9,15 @@ on:
         required: true
         type: string
       draft:
-        description: Save as a draft instead of publishing immediately
+        description: If creating a release, save it as a draft
         type: boolean
         default: false
-      publish_nuget:
-        description: Publish client packages to nuget.org after the server release
+      create_release:
+        description: Also attach all verified packages to a GitHub release
         type: boolean
         default: false
       prerelease:
-        description: Mark as a prerelease (automatic for versions with a suffix)
+        description: If creating a release, mark it as a prerelease (automatic for suffixed versions)
         type: boolean
         default: false
 
@@ -30,29 +30,26 @@ concurrency:
 
 env:
   RELEASE_VERSION: ${{ inputs.version }}
+  CREATE_RELEASE: ${{ inputs.create_release }}
 
 defaults:
   run:
     shell: pwsh
 
 jobs:
-  build:
-    name: Test, package, and release Windows x64
-    runs-on: windows-2025
-    timeout-minutes: 45
-    permissions:
-      contents: write
-    env:
-      # Cache only this workflow's dependencies, not the runner's preinstalled packages.
-      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  validate:
+    name: Validate package inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      playwright: ${{ steps.versions.outputs.playwright }}
     steps:
-      - name: Check out the selected commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-
       - name: Validate the version
+        id: versions
         run: |
           $number = '(0|[1-9][0-9]*)'
           $identifier = '(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
@@ -65,13 +62,33 @@ jobs:
           }
           $existingTag = git tag --list "v$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository tags.' }
-          if ($existingTag) { throw 'This version already has a tag. Choose a new release version.' }
+          if ($env:CREATE_RELEASE -eq 'true' -and $existingTag) { throw 'This version already has a tag. Choose a new release version.' }
+          $project = [xml](Get-Content src/Pressroom.Rendering/Pressroom.Rendering.csproj -Raw)
+          $pinned = $project.SelectSingleNode('/Project/PropertyGroup/PressroomPlaywrightVersion').InnerText
+          $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version $pinned
+          "playwright=$playwright" >> $env:GITHUB_OUTPUT
+
+  build:
+    name: Package Windows x64 for IIS
+    needs: validate
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      # Cache only this workflow's dependencies, not the runner's preinstalled packages.
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+    steps:
+      - name: Check out the selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: 8.0.x
-          global-json-file: global.json
+          dotnet-version: |
+            10.0.x
+            8.0.x
           cache: true
           cache-dependency-path: |
             src/**/packages.lock.json
@@ -98,7 +115,7 @@ jobs:
       - name: Preserve release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-packages
+          name: windows-install-packages
           path: artifacts/release/*
           if-no-files-found: error
           compression-level: 0
@@ -116,69 +133,11 @@ jobs:
           dotnet test --project tests/Pressroom.Server.Tests -c Release --no-build --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'Windows jobs browser tests failed.' }
 
-      # Use the verified local files directly; transferring them to a second
-      # runner can take much longer than building and packaging the application.
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_DRAFT: ${{ inputs.draft }}
-          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          $tag = "v$env:RELEASE_VERSION"
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
-          # Recheck immediately before publishing; never reuse or move an existing tag/release.
-          foreach ($resource in @("git/ref/tags/$tag", "releases/tags/$tag")) {
-            $response = Invoke-WebRequest -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/$resource" `
-              -Headers $headers -SkipHttpErrorCheck
-            if ($response.StatusCode -ne 404) {
-              throw "Expected an unused release version; GitHub returned HTTP $($response.StatusCode) for $resource."
-            }
-          }
-
-          $name = "Pressroom-$env:RELEASE_VERSION-win-x64-framework-dependent.zip"
-          $archive = Join-Path artifacts/release $name
-          $checksum = $archive + '.sha256'
-          $expected = (Get-Content -LiteralPath $checksum -Raw).Trim()
-          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($expected -cne "$actual  $name") { throw "Checksum mismatch for $name." }
-          $assets = @($archive, $checksum)
-
-          $notes = @"
-          Windows x64 framework-dependent package for Pressroom $env:RELEASE_VERSION, built from commit $env:GITHUB_SHA.
-
-          - Requires the .NET 10 runtime on the server.
-          - Includes Chromium, the private Playwright driver, fonts, and a release manifest.
-          - Requires the .NET 10 Hosting Bundle when hosted in IIS.
-
-          Extract the complete ZIP. Configure API keys or anonymous access in an external JSON file as described in docs/getting-started.md and docs/configuration.md in the package. Verify the download using the accompanying SHA-256 file.
-
-          The package passed the build-machine PDF warm-up. Target-server IIS acceptance remains a deployment check; see docs/windows-acceptance.md in the package.
-          "@
-          $notesPath = Join-Path $env:RUNNER_TEMP 'pressroom-release-notes.md'
-          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
-          # Creating the ref is atomic: a concurrent tag creation fails instead of
-          # letting gh attach these binaries to a different existing commit.
-          $tagBody = @{ ref = "refs/tags/$tag"; sha = $env:GITHUB_SHA } | ConvertTo-Json
-          Invoke-RestMethod -Method Post -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/git/refs" `
-            -Headers $headers -ContentType 'application/json' -Body $tagBody | Out-Null
-          $arguments = @('release', 'create', $tag) + $assets + @(
-            '--repo', $env:GITHUB_REPOSITORY, '--verify-tag',
-            '--title', "Pressroom $env:RELEASE_VERSION", '--notes-file', $notesPath, '--generate-notes'
-          )
-          if ($env:RELEASE_DRAFT -eq 'true') { $arguments += '--draft' }
-          if ($env:RELEASE_PRERELEASE -eq 'true' -or $env:RELEASE_VERSION.Contains('-')) { $arguments += '--prerelease' }
-          gh @arguments
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. The verified assets remain in this workflow run.' }
-          "Created release $tag from commit $env:GITHUB_SHA with the framework-dependent Windows package and SHA-256 file." >> $env:GITHUB_STEP_SUMMARY
-
-  publish-packages:
-    name: Package and publish the .NET client
-    needs: build
-    runs-on: ubuntu-latest
+  client:
+    name: Package the .NET client and contracts
+    needs: validate
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -186,8 +145,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            10.0.x
+            8.0.x
       - name: Restore, build, and test both client targets
         run: |
           dotnet restore tests/Pressroom.Contracts.Tests --locked-mode "-p:Version=$env:RELEASE_VERSION"
@@ -202,35 +162,27 @@ jobs:
             dotnet pack "src/$project" -c Release --no-build --no-restore -o artifacts/nuget "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
             if ($LASTEXITCODE -ne 0) { throw "Pack failed for $project." }
           }
+      - name: Verify fresh consumers and checksum the packages
+        run: |
+          ./build/Test-ClientPackages.ps1 -BuildOnly -Feed artifacts/nuget -Version $env:RELEASE_VERSION
+          foreach ($file in Get-ChildItem artifacts/nuget -File -Include *.nupkg,*.snupkg -Recurse) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            [IO.File]::WriteAllText($file.FullName + '.sha256', "$hash  $($file.Name)`n", [Text.UTF8Encoding]::new($false))
+          }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nuget-packages
           path: artifacts/nuget/*
           if-no-files-found: error
-      - name: Authenticate to nuget.org
-        if: ${{ inputs.publish_nuget && !inputs.draft }}
-        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
-        id: nuget
-        with:
-          user: ${{ secrets.NUGET_USER }}
-      - name: Publish packages and symbols
-        if: ${{ inputs.publish_nuget && !inputs.draft }}
-        env:
-          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
-        run: |
-          foreach ($project in @('Pressroom.Contracts', 'Pressroom.Client')) {
-            dotnet nuget push "artifacts/nuget/$project.$env:RELEASE_VERSION.nupkg" --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
-            if ($LASTEXITCODE -ne 0) { throw "NuGet publication failed for $project." }
-          }
+          retention-days: 14
 
-  container:
-    name: Verify Linux and release the container
-    needs: build
+  linux:
+    name: Package Linux x64 for local installation
+    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    permissions:
-      contents: write
-      packages: write
+    env:
+      PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -248,7 +200,7 @@ jobs:
         # The runtime smoke check uses the same outbound firewall as deployment.
         # The builder itself needs network access to restore pinned dependencies.
         run: |
-          ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -TestNetworkIsolation
+          ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -PlaywrightVersion $env:PLAYWRIGHT_VERSION -TestNetworkIsolation
       - name: Package the verified Linux folder
         run: |
           ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/container-publish -OutputDirectory artifacts/linux-release -Version $env:RELEASE_VERSION -Variant framework-dependent -RuntimeIdentifier linux-x64
@@ -268,37 +220,78 @@ jobs:
           format: table
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-release
+          name: linux-install-packages
           path: artifacts/linux-release/*
           if-no-files-found: error
-      - name: Attach Linux artifacts
+          retention-days: 14
+
+  release:
+    name: Attach all packages to a GitHub release
+    needs: [validate, build, client, linux]
+    if: ${{ inputs.create_release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified packages from this run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "v$env:RELEASE_VERSION" (Get-ChildItem artifacts/linux-release -File).FullName --repo $env:GITHUB_REPOSITORY
-          if ($LASTEXITCODE -ne 0) { throw 'Linux release upload failed.' }
-      - name: Push verified image
-        if: ${{ !inputs.draft }}
+          foreach ($artifact in @('windows-install-packages', 'nuget-packages', 'linux-install-packages')) {
+            gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name $artifact --dir artifacts/release
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $artifact." }
+          }
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
           RELEASE_PRERELEASE: ${{ inputs.prerelease }}
         run: |
-          $env:GH_TOKEN | docker login ghcr.io -u $env:GITHUB_ACTOR --password-stdin
-          if ($LASTEXITCODE -ne 0) { throw 'Registry login failed.' }
-          $image = "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION"
-          docker push $image
-          if ($LASTEXITCODE -ne 0) { throw 'Image push failed.' }
-          if (!$env:RELEASE_VERSION.Contains('-') -and $env:RELEASE_PRERELEASE -ne 'true') {
-            docker tag $image ghcr.io/auroris/pressroom:latest
-            docker push ghcr.io/auroris/pressroom:latest
-            if ($LASTEXITCODE -ne 0) { throw 'Latest tag push failed.' }
+          $tag = "v$env:RELEASE_VERSION"
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          # Recheck immediately before publishing; never reuse or move an existing tag/release.
+          foreach ($resource in @("git/ref/tags/$tag", "releases/tags/$tag")) {
+            $response = Invoke-WebRequest -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/$resource" `
+              -Headers $headers -SkipHttpErrorCheck
+            if ($response.StatusCode -ne 404) {
+              throw "Expected an unused release version; GitHub returned HTTP $($response.StatusCode) for $resource."
+            }
           }
-          $digest = docker image inspect $image --format '{{index .RepoDigests 0}}'
-          $size = docker image inspect $image --format '{{.Size}}'
-          $notes = gh release view "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --json body --jq .body
-          if ($LASTEXITCODE -ne 0) { throw 'Could not read release notes.' }
-          $notesPath = Join-Path $env:RUNNER_TEMP container-notes.md
-          $build = Get-Content artifacts/container-build.json -Raw | ConvertFrom-Json
-          ($notes -join "`n") + "`n`nContainer: $digest`nRuntime base: $($build.runtimeBase) (pulled for this build)`nPlaywright: $($build.playwrightVersion); Chromium: $($build.chromiumVersion)`nDocker-reported image size: $size bytes. SBOM attached; critical CVE gate passed.`n" | Set-Content $notesPath
-          gh release edit "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --notes-file $notesPath
-          if ($LASTEXITCODE -ne 0) { throw 'Could not record the image digest.' }
+
+          $checksums = @(Get-ChildItem artifacts/release -Filter '*.sha256' -File)
+          if ($checksums.Count -ne 6) { throw 'Expected checksums for both installers and four NuGet/symbol packages.' }
+          foreach ($checksum in $checksums) {
+            $name = $checksum.Name.Substring(0, $checksum.Name.Length - '.sha256'.Length)
+            $archive = Join-Path artifacts/release $name
+            $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ((Get-Content $checksum.FullName -Raw).Trim() -cne "$actual  $name") { throw "Checksum mismatch for $name." }
+          }
+          $assets = @(Get-ChildItem artifacts/release -File | ForEach-Object FullName)
+          $notes = @"
+          Pressroom $env:RELEASE_VERSION, built from commit $env:GITHUB_SHA.
+
+          - Windows x64 framework-dependent ZIP for IIS or local hosting. Requires .NET 10 and the Hosting Bundle for IIS.
+          - Linux x64 framework-dependent tarball. Requires the .NET 10 ASP.NET Core runtime and the documented native libraries, fonts and sandbox policy. Run under an unprivileged user; Docker is not required on the deployment host.
+          - Pressroom.Client and Pressroom.Contracts NuGet packages and symbols for .NET 8 and .NET 10, distributed only through GitHub.
+
+          The server packages differ because they contain platform-specific apphosts, private Node/Playwright drivers and Chromium. Each includes fonts, deployment documentation, and a file-hash manifest. Keep configuration outside the extracted release directory and verify the accompanying SHA-256 files.
+
+          The builds passed tests and sandboxed PDF warm-up. Target-server IIS/Linux acceptance remains a deployment check; see the acceptance guides in each package. The Linux SBOM describes the container used to verify its payload. Container image publishing is a separate manual workflow.
+          "@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'pressroom-release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          # Creating the ref is atomic: a concurrent tag creation fails instead of
+          # letting gh attach these binaries to a different existing commit.
+          $tagBody = @{ ref = "refs/tags/$tag"; sha = $env:GITHUB_SHA } | ConvertTo-Json
+          Invoke-RestMethod -Method Post -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/git/refs" `
+            -Headers $headers -ContentType 'application/json' -Body $tagBody | Out-Null
+          $arguments = @('release', 'create', $tag) + $assets + @(
+            '--repo', $env:GITHUB_REPOSITORY, '--verify-tag',
+            '--title', "Pressroom $env:RELEASE_VERSION", '--notes-file', $notesPath, '--generate-notes'
+          )
+          if ($env:RELEASE_DRAFT -eq 'true') { $arguments += '--draft' }
+          if ($env:RELEASE_PRERELEASE -eq 'true' -or $env:RELEASE_VERSION.Contains('-')) { $arguments += '--prerelease' }
+          gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. The verified assets remain in this workflow run.' }
+          "Created release $tag from commit $env:GITHUB_SHA with Windows and Linux installers, client NuGet packages, symbols, and SHA-256 files." >> $env:GITHUB_STEP_SUMMARY

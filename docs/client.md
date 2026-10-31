@@ -8,15 +8,21 @@ plumbing, validation, and error mapping.
 
 ## Installing the package
 
-Install the package matching the server release (use `--version` for a prerelease):
+Download and extract the `nuget-packages` artifact from a successful
+[Packages workflow run](https://github.com/auroris/Pressroom/actions/workflows/release.yml),
+or download both `Pressroom.Client` and `Pressroom.Contracts` `.nupkg` files from a
+GitHub release. Keep them together in a local feed directory, such as `./packages`,
+and install the matching version:
 
 ```sh
-dotnet add package Pressroom.Client
+dotnet add package Pressroom.Client --version <version> --source ./packages
 ```
 
 `Pressroom.Contracts` holds the request and option records, `IPdfRenderer`, the
 validator, and the JSON settings, and can be referenced on its own by code that
-only builds requests.
+only builds requests. The workflows distribute these packages only through GitHub;
+they do not publish them to NuGet.org or another NuGet feed. Symbol packages and
+SHA-256 files are included in the download too.
 
 ## Creating a client
 

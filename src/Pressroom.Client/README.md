@@ -3,8 +3,12 @@
 HTTP client for the Pressroom HTML-to-PDF service, for .NET 8 and .NET 10.
 Depends only on Pressroom.Contracts and the framework; no browser installation.
 
+Download and extract `nuget-packages` from the GitHub **Packages** workflow, or
+download both Client and Contracts `.nupkg` files from a GitHub release. Keep them
+together in a local feed directory; these builds are not published to NuGet.org.
+
 ```sh
-dotnet add package Pressroom.Client
+dotnet add package Pressroom.Client --version <version> --source ./packages
 ```
 
 ```csharp
