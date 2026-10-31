@@ -123,29 +123,40 @@ The build-machine check proves the payload launches and renders on the publishin
 machine. It does not replace the target-server
 [acceptance record](windows-acceptance.md).
 
-## Creating a GitHub release
+## Manual package builds and GitHub releases
 
-The [Release workflow](../.github/workflows/release.yml) runs manually from the
-repository's default branch:
+The [Packages workflow](../.github/workflows/release.yml) has only a
+`workflow_dispatch` trigger. Open **Actions → Packages → Run workflow**, select
+the branch and enter a version without `v`, such as `1.2.3` or `1.2.3-rc.1`.
+Three jobs run in parallel after input validation:
 
-1. Open **Actions → Release → Run workflow** and select the branch to release.
-2. Enter an unused version without a `v` prefix, such as `1.2.3` or `1.2.3-rc.1`.
-3. Optionally select **draft** or **prerelease**, then **Run workflow**. Versions
-   with a suffix are marked prerelease automatically.
+| GitHub artifact | Contents |
+|---|---|
+| `nuget-packages` | `Pressroom.Client` and its `Pressroom.Contracts` dependency, each as `.nupkg` and `.snupkg`, with SHA-256 files |
+| `windows-install-packages` | `Pressroom-<version>-win-x64-framework-dependent.zip` and its SHA-256 file, for IIS or local Windows hosting |
+| `linux-install-packages` | `Pressroom-<version>-linux-x64-framework-dependent.tar.gz`, its SHA-256 file, and the verification image's SBOM |
 
-The workflow restores locked dependencies, builds and tests on Windows, publishes
-the `IisFolder` profile, and requires the real Chromium PDF warm-up to pass before
-creating a release tagged `v<version>` at the exact commit selected when the run
-started. Existing tags and releases are never overwritten; if an interrupted upload
-leaves a draft or tag, inspect it before retrying with that version.
+The Windows and Linux packages differ: they contain native apphosts, private
+Node/Playwright drivers and Chromium for their respective platforms. Both include
+fonts, documentation and a file-hash manifest, and require the .NET 10 ASP.NET Core
+runtime. IIS also needs the Hosting Bundle. Linux needs the documented native
+libraries and sandbox policy, and runs as an unprivileged user. Docker is used to
+build and verify the Linux payload, but is not required for its local installation.
+Both installer builds use the repository's locked Playwright version.
 
-Each release contains `Pressroom-<version>-win-x64-framework-dependent.zip` and a
-`.zip.sha256` checksum. The workflow caches NuGet packages by lock file, creates the
-release directly from the verified files on the build runner, uses GitHub's
-built-in token with repository write permission for the tag and release, and keeps
-the ZIP and checksum as workflow artifacts for 14 days. See GitHub's
-[manual workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
-for the required repository access.
+The workflow tests both client target frameworks and compiles fresh consumers
+against the actual packages. Installer jobs require the sandboxed browser checks;
+the Linux job also verifies network isolation and passes the critical-CVE gate.
+Artifacts remain downloadable from the run for 14 days. No packages are pushed
+to NuGet.org, another NuGet feed, or a container registry by this workflow.
+
+Optionally enable **create_release** to attach all verified files to a GitHub
+release after every build passes. **draft** and **prerelease** apply to that release;
+versions with a suffix are marked prerelease automatically. Only this optional job
+has repository write permission. It verifies all package checksums and creates
+`v<version>` at the selected commit; existing tags and releases are never overwritten.
+Use an unused version when creating a release. If an interrupted upload leaves a
+tag or draft, inspect it before retrying. A package-only run can reuse a version.
 
 ## Packages
 
@@ -173,16 +184,12 @@ published version and refresh the lock files. Subsequent releases must pass that
 [API baseline](https://learn.microsoft.com/dotnet/fundamentals/apicompat/package-validation/baseline-version-validator).
 There is deliberately no fictional baseline before the first publication.
 
-The release workflow packs on Ubuntu only after the Windows release succeeds.
-Publication is opt-in with `publish_nuget` (default false); draft runs always
-preserve packages as artifacts without publishing them. Configure
-`NUGET_USER` and a nuget.org [trusted publishing policy](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing)
-for owner `auroris`, repository `Pressroom`, workflow `release.yml`, scoped to
-`Pressroom.Client` and `Pressroom.Contracts`. No permanent API key is needed.
-The workflow pushes symbols with the packages. `dotnet nuget verify` verifies
-signatures, not Source Link; local unsigned packages are expected to lack a
-repository signature until nuget.org signs them. Inspect Source Link in the PDB
-or NuGet Package Explorer; verify downloaded, repository-signed packages after release.
+The Packages workflow keeps the client and contracts packages on GitHub. Download
+and extract `nuget-packages` from a successful run, or download both `.nupkg` files
+from a GitHub release into a local feed directory. See [client installation](client.md#installing-the-package).
+No NuGet account, publication credentials, or registry setup is required.
+Packages are unsigned; `dotnet nuget verify` checks signatures, not Source Link.
+Inspect Source Link in the PDB or NuGet Package Explorer.
 
 `build/Test-ClientPackages.ps1 -ServerUrl http://127.0.0.1:5177/` creates fresh
 web API consumers for both targets, installs packages from `artifacts/nuget`,
@@ -190,6 +197,8 @@ compiles the client example and renders against an anonymous loopback test serve
 Use `-Net8Dotnet` if the .NET 8 runtime is installed separately. Each run uses a
 private package cache so an older local package with the same version cannot mask
 a change.
+Use `-BuildOnly` instead of `-ServerUrl` to verify package restore and consumer
+compilation without a running server, as the packaging workflow does.
 
 For the longer jobs acceptance run, enable the browser tests as above and set
 `PRESSROOM_JOB_ACCEPTANCE_COUNT=500`. Set `PRESSROOM_JOB_METRICS_PATH` to save
