@@ -59,7 +59,23 @@ Chrome, no font installation, no downloads at run time.
   and external JSON configuration. See [Linux acceptance](docs/linux-acceptance.md)
   and optional network isolation in [containers](docs/container.md).
 
+## Choose a deployment
+
+- **Internet-facing use:** use the [Linux Docker image with the documented iptables
+  isolation](docs/container.md#optional-linux-outbound-isolation), API-key authentication,
+  and an HTTPS reverse proxy in front of the loopback-bound API. A
+  [direct Linux installation](docs/linux.md) is also suitable when it runs under
+  a dedicated unprivileged user; use API keys and HTTPS there too.
+- **Intranet use:** Windows/IIS installations and Windows containers are intended
+  primarily for networks where Pressroom is not exposed to internet traffic.
+  Both Linux deployment options also work on intranets.
+
+Network isolation remains an optional deployment setting; enable it for the
+recommended internet-facing Docker setup. See the [security model](docs/security.md).
+
 ## Quick start
+
+This example uses a direct Windows installation for an intranet.
 
 Download and verify the latest release ZIP, then extract the whole archive into a
 folder such as `C:\Sites\Pressroom`. Install the
@@ -120,13 +136,6 @@ var pdf = await pressroom.RenderAsync(new RenderRequest
 
 The [Getting started guide](docs/getting-started.md) walks through each step, and
 the [Deployment guide](docs/deployment.md) covers the production IIS setup.
-
-> [!WARNING]
-> Pressroom is designed for an internal network behind HTTPS, called by applications
-> you control. It isolates each document aggressively, but it is not an internet-facing
-> HTML sanitizer and makes no operating-system egress guarantee on its own. Give each
-> calling application its own key, keep the settings file outside the release folder,
-> and read the [Security model](docs/security.md) before exposing it more widely.
 
 ## Documentation
 
