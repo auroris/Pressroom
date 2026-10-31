@@ -404,6 +404,42 @@ public sealed class ServerTests
     }
 
     [Fact]
+    public async Task InfoCountsRequestsWaitingForCoordinatorCapacity()
+    {
+        using var app = new TestApplication(queueLimit: 1);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        app.Renderer.Callback = async (_, token) =>
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(token);
+            return FakeRenderer.Output;
+        };
+        using var client = app.CreateAuthenticatedClient();
+        var first = client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var second = client.PostAsync("/v1/render", JsonBody(), TestContext.Current.CancellationToken);
+        try
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                using var info = JsonDocument.Parse(await client.GetStringAsync("/v1/info", deadline.Token));
+                if (info.RootElement.GetProperty("queued").GetInt32() == 1) break;
+                await Task.Delay(10, deadline.Token);
+            }
+            using var excess = await client.PostAsync("/v1/render", JsonBody(), deadline.Token);
+            Assert.Equal(HttpStatusCode.TooManyRequests, excess.StatusCode);
+        }
+        finally { release.TrySetResult(); }
+        Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await second).StatusCode);
+        using var idle = JsonDocument.Parse(await client.GetStringAsync("/v1/info", TestContext.Current.CancellationToken));
+        Assert.Equal(0, idle.RootElement.GetProperty("queued").GetInt32());
+    }
+
+    [Fact]
     public async Task OverallTimeoutCancelsRendererAndReleasesAdmission()
     {
         using var app = new TestApplication();
@@ -470,7 +506,7 @@ public sealed class ServerTests
 }
 
 internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true, bool javaScriptEnabled = false,
-    bool jobsEnabled = false, Action<Pressroom.Server.Jobs.JobsSettings>? configureJobs = null, string? pathBase = null)
+    bool jobsEnabled = false, Action<Pressroom.Server.Jobs.JobsSettings>? configureJobs = null, string? pathBase = null, int queueLimit = 0)
     : WebApplicationFactory<Program>
 {
     public const string Secret = "a-test-only-secret-with-32-characters";
@@ -519,7 +555,7 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
             services.PostConfigure<RenderSettings>(options =>
             {
                 options.Concurrency = jobsEnabled ? 2 : 1;
-                options.QueueLimit = 0;
+                options.QueueLimit = queueLimit;
                 options.MaxBodyBytes = maxBodyBytes;
                 options.DefaultTimeoutMs = 5000;
                 options.MaxTimeoutMs = 10000;

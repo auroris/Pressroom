@@ -1,5 +1,34 @@
 # Windows / IIS release acceptance
 
+## Container VM verification — 2026-10-31
+
+The supplied Windows Server 2022 Standard VM (also a domain controller) ran Docker
+29.9.2 and the full `windows/server:ltsc2022` image with .NET 10.0.14 copied from
+Microsoft's serviced ASP.NET image. Server Core failed the sandboxed Chromium
+check; the full image passed. The image OS version was `10.0.20348.5773`.
+Playwright 1.64.1, private Node v24.22.1 and Chromium 156.0.8078.4 were matched;
+sandboxing and normal dependency validation remained enabled.
+
+The final image passed authenticated two-page bilingual PDF rendering, invalid-key
+401, empty printer discovery, ContainerUser identity, read-only external settings,
+active-job shutdown, and loss of job state after its `--rm` lifecycle. Startup
+including policy verification/container creation took 23.710 s; clean shutdown
+took 5.516 s with exit code zero. Optional HNS ACLs passed a reachable host TCP
+canary, internet/DNS denial and blocked Windows service ports 135 and 5985 while
+the API remained reachable. Basic startup does not install these rules;
+`-BlockOutbound` explicitly opts in.
+
+Image ID: `sha256:85cff65df926b59a819ee4f96fe08b8ac0e464ee3b5981b0ad08fc1eeb9caf10`.
+Windows base: `sha256:7a15615ebaa86fc085707866747b8806d457ab939a97c98c5af50e6c34b4a5d2`.
+ASP.NET base: `sha256:a0465a65a8e1841eb88f586d9fa2365a0f1b19280a6998d6bd085cb66aec6bed`.
+Evidence is in `artifacts/vm-acceptance` locally and `C:\PressroomTest\final\artifacts`
+on the VM. Subsequent manual builds pull serviced bases and the latest stable
+Playwright and must pass again. Native Windows OS/Chromium vulnerabilities are not
+covered by the workflow's NuGet dependency audit.
+
+These checks **do not qualify IIS or physical printing on this VM**. The direct
+Windows/IIS checklist below remains a separate deployment check.
+
 The Visual Studio publish check proves that the selected payload can launch and
 render on the publishing machine. It does not prove a clean IIS deployment or
 the absence of hidden machine prerequisites. Complete this record against the

@@ -1,6 +1,5 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Server.IIS;
 using Microsoft.Extensions.Options;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
@@ -91,11 +90,13 @@ public partial class Program
         if (!check)
             builder.Services.AddHostedService<ConfigurationValidationService>();
 
+#if PRESSROOM_IIS
         builder.Services.Configure<IISServerOptions>(options =>
         {
             options.AutomaticAuthentication = false;
             options.MaxRequestBodySize = ServerConfiguration.OuterBodyLimit;
         });
+#endif
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.Limits.MaxRequestBodySize = ServerConfiguration.OuterBodyLimit;

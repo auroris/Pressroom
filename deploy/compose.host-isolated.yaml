@@ -1,0 +1,9 @@
+# Optional outbound isolation after applying the iptables rules in docs/container.md.
+services:
+  pressroom:
+    dns: [127.0.0.1]
+    networks: [api]
+networks:
+  api:
+    external: true
+    name: pressroom-egress-blocked

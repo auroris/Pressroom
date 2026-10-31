@@ -5,6 +5,9 @@
     <RootNamespace>Pressroom.Server</RootNamespace>
     <AssemblyName>Pressroom.Server</AssemblyName>
     <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+    <!-- Distro-built Linux SDKs omit IISServerOptions. Include IIS configuration
+         only for Windows targets (or ordinary development builds on Windows). -->
+    <DefineConstants Condition="$(RuntimeIdentifier.StartsWith('win-')) or ('$(RuntimeIdentifier)' == '' and '$(OS)' == 'Windows_NT')">$(DefineConstants);PRESSROOM_IIS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />

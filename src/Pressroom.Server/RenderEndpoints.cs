@@ -40,7 +40,7 @@ public static class RenderEndpoints
             return Results.Json(new { status = ready ? "ready" : "unavailable" }, statusCode: ready ? 200 : 503);
         }).AllowAnonymous();
 
-        app.MapGet("/v1/info", (IHtmlRenderer renderer, AdmissionGate admission, IOptions<RenderSettings> configured, IJobStore jobs) =>
+        app.MapGet("/v1/info", (IHtmlRenderer renderer, AdmissionGate admission, IOptions<RenderSettings> configured, IJobStore jobs, RenderCoordinator coordinator) =>
         {
             var state = renderer.GetSnapshot();
             var settings = configured.Value;
@@ -50,7 +50,7 @@ public static class RenderEndpoints
                 playwrightVersion = state.PlaywrightVersion,
                 chromiumVersion = state.BrowserVersion,
                 active = state.Active,
-                queued = state.Queued,
+                queued = state.Queued + coordinator.WaitingSync,
                 admitted = admission.Admitted,
                 admissionLimit = admission.Limit,
                 concurrency = settings.Concurrency,

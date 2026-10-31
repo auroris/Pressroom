@@ -13,7 +13,7 @@
   <img alt="Renderer: Chromium headless shell" src="docs/images/badge-renderer.svg">
   <img alt="Output: PDF or Windows printer" src="docs/images/badge-output.svg">
   <img alt="Client: .NET, HTTP-only" src="docs/images/badge-client.svg">
-  <a href="docs/container.md"><img alt="Container: Linux x64" src="https://img.shields.io/badge/container-linux--x64-245c78"></a>
+  <a href="docs/container.md"><img alt="Containers: Linux and Windows x64" src="https://img.shields.io/badge/containers-linux%20%7C%20windows--x64-245c78"></a>
   <a href="https://github.com/auroris/Pressroom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/auroris/Pressroom?label=release&color=2ea44f"></a>
 </p>
 
@@ -56,7 +56,8 @@ Chrome, no font installation, no downloads at run time.
 - **Opt-in batch jobs.** Submit, poll, download or cancel durable jobs. Per-key
   scheduling reserves capacity for interactive requests; local retention is bounded.
 - **Linux and containers.** Sandboxed Linux x64 packages, a non-root container,
-  and JSON-file configuration. See the pending [Linux acceptance](docs/linux-acceptance.md).
+  and external JSON configuration. See [Linux acceptance](docs/linux-acceptance.md)
+  and optional network isolation in [containers](docs/container.md).
 
 ## Quick start
 
@@ -140,7 +141,7 @@ the [Deployment guide](docs/deployment.md) covers the production IIS setup.
 | [Deployment](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
 | [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, tarball packaging and rollback. |
 | [Containers](docs/container.md) | Sandboxed non-root image, Compose, Kubernetes, volumes, health and image verification. |
-| [Linux acceptance](docs/linux-acceptance.md) | Clean-host qualification checklist and pending deployment measurements. |
+| [Linux acceptance](docs/linux-acceptance.md) | Ubuntu VM, container, load, recovery, and network-policy verification. |
 | [Security model](docs/security.md) | Trust boundaries, document isolation controls, authentication, retention, resource protection, and what is not guaranteed. |
 | [Windows / IIS acceptance](docs/windows-acceptance.md) | The checklist shipped with each release for qualifying a target server. |
 | [Developing](docs/developing.md) | Repository layout, build and test, publishing from Visual Studio, the GitHub release workflow, and the design history. |

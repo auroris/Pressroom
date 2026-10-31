@@ -11,6 +11,8 @@ public sealed class RenderCoordinator(IHtmlRenderer renderer, IOptions<RenderSet
     private readonly object _sync = new();
     private int _waitingSync;
 
+    public int WaitingSync { get { lock (_sync) return _waitingSync; } }
+
     public async Task<RenderOutput> RenderAsync(RenderRequest request, CancellationToken token)
     {
         lock (_sync) _waitingSync++;

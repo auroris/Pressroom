@@ -236,15 +236,19 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Permit user namespaces on this disposable CI host
+      - name: Prepare optional isolation on this disposable test host
         shell: bash
         run: |
-          # Ubuntu AppArmor's host policy otherwise denies Chromium's userns sandbox.
-          # Production hosts should use the executable-specific policy in docs/linux.md.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          if test -f /proc/sys/kernel/unprivileged_userns_clone; then sudo sysctl -w kernel.unprivileged_userns_clone=1; fi
+          docker network create --driver bridge --opt com.docker.network.bridge.name=pressroom0 --opt com.docker.network.bridge.enable_icc=false pressroom-egress-blocked
+          sudo iptables -I DOCKER-USER 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo iptables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo ip6tables -I FORWARD 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo ip6tables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
       - name: Build and verify as an unprivileged user
-        run: ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION"
+        # The runtime smoke check uses the same outbound firewall as deployment.
+        # The builder itself needs network access to restore pinned dependencies.
+        run: |
+          ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -TestNetworkIsolation
       - name: Package the verified Linux folder
         run: |
           ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/container-publish -OutputDirectory artifacts/linux-release -Version $env:RELEASE_VERSION -Variant framework-dependent -RuntimeIdentifier linux-x64
@@ -294,7 +298,7 @@ jobs:
           $notes = gh release view "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --json body --jq .body
           if ($LASTEXITCODE -ne 0) { throw 'Could not read release notes.' }
           $notesPath = Join-Path $env:RUNNER_TEMP container-notes.md
-          $base = 'mcr.microsoft.com/dotnet/aspnet:10.0-noble@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee'
-          ($notes -join "`n") + "`n`nContainer: $digest`nRuntime base: $base`nUncompressed image size: $size bytes. SBOM attached; critical CVE gate passed.`n" | Set-Content $notesPath
+          $build = Get-Content artifacts/container-build.json -Raw | ConvertFrom-Json
+          ($notes -join "`n") + "`n`nContainer: $digest`nRuntime base: $($build.runtimeBase) (pulled for this build)`nPlaywright: $($build.playwrightVersion); Chromium: $($build.chromiumVersion)`nDocker-reported image size: $size bytes. SBOM attached; critical CVE gate passed.`n" | Set-Content $notesPath
           gh release edit "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --notes-file $notesPath
           if ($LASTEXITCODE -ne 0) { throw 'Could not record the image digest.' }

@@ -47,16 +47,19 @@ spec:
         - name: settings
           secret: { secretName: pressroom-settings }
         - name: state
-          persistentVolumeClaim: { claimName: pressroom-state }
+          emptyDir: { medium: Memory, sizeLimit: 512Mi }
         - name: tmp
           emptyDir: { medium: Memory, sizeLimit: 256Mi }
         - name: shm
           emptyDir: { medium: Memory, sizeLimit: 1Gi }
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: pressroom-state }
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: pressroom-api-only }
 spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests: { storage: 5Gi }
+  podSelector:
+    matchLabels: { app: pressroom }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ protocol: TCP, port: 8080 }]
+  egress: []

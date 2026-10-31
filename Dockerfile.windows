@@ -1,0 +1,19 @@
+# escape=`
+# Pull the latest serviced bases compatible with a Windows Server 2022 host.
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-windowsservercore-ltsc2022 AS dotnet
+FROM mcr.microsoft.com/windows/server:ltsc2022
+SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue';"]
+COPY --from=dotnet ["C:/Program Files/dotnet", "C:/dotnet"]
+WORKDIR C:/app
+COPY artifacts/windows-container-publish/ C:/app/
+# ContainerUser's well-known SID avoids account-name lookup on domain hosts.
+RUN New-Item -ItemType Directory -Force C:/state,C:/config | Out-Null; icacls C:/state /grant '*S-1-5-93-2-2:(OI)(CI)M'; if ($LASTEXITCODE -ne 0) { throw 'State permissions failed' }
+ENV DOTNET_ROOT=C:/dotnet
+ENV ASPNETCORE_URLS=http://+:8080
+LABEL org.opencontainers.image.source="https://github.com/auroris/Pressroom" `
+      org.opencontainers.image.licenses="MIT" `
+      org.opencontainers.image.title="Pressroom"
+USER ContainerUser
+EXPOSE 8080
+ENTRYPOINT ["C:\\app\\Pressroom.Server.exe"]
+CMD ["--config", "C:\\config\\pressroom.settings.json"]

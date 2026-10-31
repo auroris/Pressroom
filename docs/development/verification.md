@@ -4,8 +4,10 @@
 
 The four roadmap items are implemented in the working tree. **Nothing was
 published to nuget.org or a container registry.** The release workflow defaults
-`publish_nuget` to false. Linux and container qualification remain pending a real
-Linux host; the checklist in [Linux acceptance](../linux-acceptance.md) is unfilled.
+`publish_nuget` to false. Subsequent VM tests qualified the Ubuntu 26.04 direct
+installation and Linux/Windows container scenarios described in
+[Linux acceptance](../linux-acceptance.md) and [Windows acceptance](../windows-acceptance.md).
+The separate `Container images` workflow is manual-only and uses GHCR.
 
 ### Windows build and automated checks
 
