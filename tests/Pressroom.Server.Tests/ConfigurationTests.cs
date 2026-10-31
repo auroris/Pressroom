@@ -133,7 +133,8 @@ public sealed class ConfigurationTests : IDisposable
         using var configuration = new ConfigurationManager();
         ApplicationConfiguration.Configure(configuration, _directory, "selected.json");
         var printing = configuration.GetSection("Printing").Get<PrintingSettings>()!;
-        printing.Validate();
+        if (OperatingSystem.IsWindows()) printing.Validate();
+        else Assert.Throws<InvalidOperationException>(() => printing.Validate());
         Assert.Equal("Office Printer", printing.Printers["office"]);
         Assert.Equal("Microsoft Print to PDF", printing.Printers["pdf-test"]);
         Assert.Equal(Path.Combine(_directory, "SumatraPDF.exe"), printing.SumatraPdfPath);

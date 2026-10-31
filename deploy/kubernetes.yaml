@@ -1,0 +1,62 @@
+# Install deploy/pressroom-seccomp.json at <kubelet-root>/seccomp/pressroom.json
+# on every eligible node. Create the pressroom-settings Secret from your JSON file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pressroom
+spec:
+  replicas: 1 # Local job storage supports one instance only.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: pressroom }
+  template:
+    metadata:
+      labels: { app: pressroom }
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: Localhost, localhostProfile: pressroom.json }
+      containers:
+        - name: pressroom
+          image: ghcr.io/auroris/pressroom:REPLACE_WITH_VERSION
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: "1", memory: 1536Mi }
+            limits: { memory: 2Gi }
+          readinessProbe:
+            httpGet: { path: /v1/health, port: 8080 }
+            periodSeconds: 5
+          startupProbe:
+            httpGet: { path: /v1/health, port: 8080 }
+            periodSeconds: 2
+            failureThreshold: 30
+          volumeMounts:
+            - { name: settings, mountPath: /etc/pressroom, readOnly: true }
+            - { name: state, mountPath: /var/lib/pressroom }
+            - { name: tmp, mountPath: /tmp }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: settings
+          secret: { secretName: pressroom-settings }
+        - name: state
+          persistentVolumeClaim: { claimName: pressroom-state }
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 256Mi }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 1Gi }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: pressroom-state }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 5Gi }

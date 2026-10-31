@@ -11,6 +11,7 @@ using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
 using Pressroom.Server.Printing;
+using Pressroom.Server.Jobs;
 
 namespace Pressroom.Server;
 
@@ -39,7 +40,7 @@ public static class RenderEndpoints
             return Results.Json(new { status = ready ? "ready" : "unavailable" }, statusCode: ready ? 200 : 503);
         }).AllowAnonymous();
 
-        app.MapGet("/v1/info", (IHtmlRenderer renderer, AdmissionGate admission, IOptions<RenderSettings> configured) =>
+        app.MapGet("/v1/info", (IHtmlRenderer renderer, AdmissionGate admission, IOptions<RenderSettings> configured, IJobStore jobs) =>
         {
             var state = renderer.GetSnapshot();
             var settings = configured.Value;
@@ -59,7 +60,8 @@ public static class RenderEndpoints
                 rendersSinceStartup = state.Completed,
                 lastBrowserRestartUtc = state.LastRestartUtc,
                 pageSizes = NamedPageSizes,
-                fonts = state.Fonts
+                fonts = state.Fonts,
+                jobs = jobs.Capacity
             });
         }).RequireAuthorization();
 
@@ -71,6 +73,11 @@ public static class RenderEndpoints
 
         app.MapGet("/v1/printers", async (HttpContext context, IPrintService printing) =>
         {
+            if (!OperatingSystem.IsWindows())
+            {
+                await Results.Json(new { printers = Array.Empty<string>() }).ExecuteAsync(context);
+                return;
+            }
             if (!(await context.AuthenticateAsync(AuthenticationNames.ApiKey)).Succeeded)
             {
                 await context.ChallengeAsync(AuthenticationNames.ApiKey);
@@ -82,7 +89,7 @@ public static class RenderEndpoints
 
     private static async Task HandleRenderAsync(HttpContext context, IHtmlRenderer renderer,
         AdmissionGate admission, IOptions<RenderSettings> configured,
-        IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory, IPrintService printing)
+        IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory, IPrintService printing, RenderCoordinator coordinator)
     {
         var settings = configured.Value;
         if (!HasSupportedContentType(context.Request))
@@ -136,6 +143,11 @@ public static class RenderEndpoints
             }
 
             var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
+            if (request.Printer is not null && !OperatingSystem.IsWindows())
+            {
+                await Problems.WriteAsync(context, 400, "Printing unavailable", "Printing is available on Windows only.");
+                return;
+            }
             if (request.Printer is not null && !authentication.Succeeded)
             {
                 await context.ChallengeAsync(AuthenticationNames.ApiKey);
@@ -183,7 +195,7 @@ public static class RenderEndpoints
                 return;
             }
 
-            var output = await renderer.RenderAsync(request, deadline.Token);
+            var output = await coordinator.RenderAsync(request, deadline.Token);
             deadline.Token.ThrowIfCancellationRequested();
             pages = output.PageCount;
             blocked = output.BlockedResources;
@@ -278,7 +290,7 @@ public static class RenderEndpoints
     private static string SafeCaller(string? value) => string.IsNullOrWhiteSpace(value) ? "unknown"
         : new string(value.Where(c => !char.IsControl(c)).Take(128).ToArray());
 
-    private static bool HasSupportedContentType(HttpRequest request)
+    internal static bool HasSupportedContentType(HttpRequest request)
     {
         if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var media)
             || !string.Equals(media.MediaType.Value, "application/json", StringComparison.OrdinalIgnoreCase))
@@ -289,7 +301,7 @@ public static class RenderEndpoints
         return string.IsNullOrWhiteSpace(encoding) || string.Equals(encoding, "identity", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void RejectBase(string? html, string field, IDictionary<string, string[]> errors)
+    internal static void RejectBase(string? html, string field, IDictionary<string, string[]> errors)
     {
         if (!string.IsNullOrEmpty(html) && DocumentValidator.HasBaseElement(html))
             errors[field] = ["The base element is not supported. Embed all document resources."];

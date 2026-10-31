@@ -469,7 +469,8 @@ public sealed class ServerTests
     }, JsonDefaults.Options), Encoding.UTF8, "application/json");
 }
 
-internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true, bool javaScriptEnabled = false)
+internal sealed class TestApplication(bool preauthenticatedPrincipal = false, long maxBodyBytes = 4096, bool blockPdfWrites = false, int bodyReadDelayMs = 0, AuthMode authMode = AuthMode.ApiKey, bool configureKey = true, bool javaScriptEnabled = false,
+    bool jobsEnabled = false, Action<Pressroom.Server.Jobs.JobsSettings>? configureJobs = null, string? pathBase = null)
     : WebApplicationFactory<Program>
 {
     public const string Secret = "a-test-only-secret-with-32-characters";
@@ -517,13 +518,18 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
             services.PostConfigure<PathsSettings>(options => options.StateRoot = _stateRoot);
             services.PostConfigure<RenderSettings>(options =>
             {
-                options.Concurrency = 1;
+                options.Concurrency = jobsEnabled ? 2 : 1;
                 options.QueueLimit = 0;
                 options.MaxBodyBytes = maxBodyBytes;
                 options.DefaultTimeoutMs = 5000;
                 options.MaxTimeoutMs = 10000;
             });
-            services.AddSingleton<IStartupFilter>(new TestStartupFilter(this, preauthenticatedPrincipal, blockPdfWrites, bodyReadDelayMs));
+            services.PostConfigure<Pressroom.Server.Jobs.JobsSettings>(options =>
+            {
+                options.Enabled = jobsEnabled;
+                configureJobs?.Invoke(options);
+            });
+            services.AddSingleton<IStartupFilter>(new TestStartupFilter(this, preauthenticatedPrincipal, blockPdfWrites, bodyReadDelayMs, pathBase));
         });
     }
 
@@ -538,16 +544,25 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
     {
         WriteRelease.TrySetResult();
         base.Dispose(disposing);
-        if (disposing && Directory.Exists(_stateRoot))
-            Directory.Delete(_stateRoot, recursive: true);
+        if (disposing)
+        {
+            // Program's await-using disposal can finish just after TestServer disposal.
+            // Wait briefly for the durable store's exclusive instance lock to close.
+            for (var attempt = 0; Directory.Exists(_stateRoot); attempt++)
+            {
+                try { Directory.Delete(_stateRoot, recursive: true); }
+                catch (IOException) when (attempt < 40) { Thread.Sleep(25); }
+            }
+        }
     }
 
-    private sealed class TestStartupFilter(TestApplication app, bool principal, bool blockWrites, int bodyDelayMs) : IStartupFilter
+    private sealed class TestStartupFilter(TestApplication app, bool principal, bool blockWrites, int bodyDelayMs, string? pathBase) : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => builder =>
         {
             builder.Use(async (context, following) =>
             {
+                if (pathBase is not null) context.Request.PathBase = pathBase;
                 if (principal)
                     context.User = new ClaimsPrincipal(new ClaimsIdentity([
                         new Claim(ClaimTypes.Name, "TEST\\member"),
@@ -571,12 +586,13 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
 internal sealed class FakeRenderer : IHtmlRenderer
 {
     public static RenderOutput Output => new(Encoding.ASCII.GetBytes("%PDF-1.7\n%%EOF"), 1, 0);
-    public int Calls { get; private set; }
+    private int _calls;
+    public int Calls => Volatile.Read(ref _calls);
     public RenderRequest? LastRequest { get; private set; }
     public Func<RenderRequest, CancellationToken, Task<RenderOutput>>? Callback { get; set; }
     public Task<RenderOutput> RenderAsync(RenderRequest request, CancellationToken cancellationToken = default)
     {
-        Calls++;
+        Interlocked.Increment(ref _calls);
         LastRequest = request;
         return Callback?.Invoke(request, cancellationToken) ?? Task.FromResult(Output);
     }

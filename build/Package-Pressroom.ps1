@@ -8,7 +8,8 @@ param(
     [Parameter(Mandatory = $true)][string]$PublishDirectory,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
     [Parameter(Mandatory = $true)][string]$Version,
-    [Parameter(Mandatory = $true)][ValidateSet('framework-dependent', 'self-contained')][string]$Variant
+    [Parameter(Mandatory = $true)][ValidateSet('framework-dependent', 'self-contained')][string]$Variant,
+    [ValidateSet('win-x64', 'linux-x64')][string]$RuntimeIdentifier = 'win-x64'
 )
 
 Set-StrictMode -Version Latest
@@ -34,18 +35,22 @@ if (!(Test-Path -LiteralPath $publishRoot -PathType Container)) {
     throw 'PublishDirectory does not exist.'
 }
 
+$windowsPayload = $RuntimeIdentifier -eq 'win-x64'
 $requiredFiles = @(
-    'Pressroom.Server.exe', 'Pressroom.Server.dll', 'Pressroom.Server.deps.json',
-    'Pressroom.Server.runtimeconfig.json', 'web.config', 'appsettings.json',
-    'release-manifest.json', '.playwright/node/win32_x64/node.exe',
+    'Pressroom.Server.dll', 'Pressroom.Server.deps.json',
+    'Pressroom.Server.runtimeconfig.json', 'appsettings.json',
+    'release-manifest.json',
     '.playwright/package/cli.js', 'fonts/manifest.json'
 )
+$requiredFiles += if ($windowsPayload) { @('Pressroom.Server.exe', 'web.config', '.playwright/node/win32_x64/node.exe') }
+    else { @('Pressroom.Server', '.playwright/node/linux-x64/node') }
 foreach ($relative in $requiredFiles) {
     if (!(Test-Path -LiteralPath (Join-Path $publishRoot $relative) -PathType Leaf)) {
         throw "The publish payload is missing $relative."
     }
 }
-$headless = @(Get-ChildItem -LiteralPath (Join-Path $publishRoot 'browsers') -Recurse -Force -File -Filter 'chrome-headless-shell.exe')
+$shellName = if ($windowsPayload) { 'chrome-headless-shell.exe' } else { 'chrome-headless-shell' }
+$headless = @(Get-ChildItem -LiteralPath (Join-Path $publishRoot 'browsers') -Recurse -Force -File -Filter $shellName)
 if ($headless.Count -ne 1) {
     throw 'The publish payload must contain exactly one Chromium headless shell.'
 }
@@ -55,12 +60,12 @@ $versionSuffix = if ($Version.Contains('+')) { '.' } else { '+' }
 if ($manifest.version -cne $Version -and !([string]$manifest.version).StartsWith($Version + $versionSuffix, [StringComparison]::Ordinal)) {
     throw 'The release manifest version does not match the requested package version.'
 }
-if ($manifest.schemaVersion -ne 1 -or $manifest.product -cne 'Pressroom' -or $manifest.runtimeIdentifier -cne 'win-x64' -or
+if ($manifest.schemaVersion -ne 1 -or $manifest.product -cne 'Pressroom' -or $manifest.runtimeIdentifier -cne $RuntimeIdentifier -or
     $manifest.selfContained -isnot [bool] -or $manifest.selfContained -ne ($Variant -eq 'self-contained') -or
     $manifest.buildMachineCheck.status -cne 'passed' -or
     $manifest.buildMachineCheck.chromiumSandbox -ne $true -or
     $manifest.buildMachineCheck.dependencyValidation -cne 'enabled') {
-    throw 'The release manifest does not describe a verified Windows payload for this variant.'
+    throw 'The release manifest does not describe a verified payload for this runtime and variant.'
 }
 
 $sourceItems = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -Force)
@@ -72,7 +77,8 @@ if (@($sourceFiles | Where-Object { $_.Name -eq 'pressroom.settings.json' }).Cou
     throw 'An external settings file must not be included in a release.'
 }
 
-$assetName = "Pressroom-$Version-win-x64-$Variant.zip"
+$extension = if ($windowsPayload) { 'zip' } else { 'tar.gz' }
+$assetName = "Pressroom-$Version-$RuntimeIdentifier-$Variant.$extension"
 $archivePath = Join-Path $outputRoot $assetName
 $checksumPath = $archivePath + '.sha256'
 if ((Test-Path -LiteralPath $archivePath) -or (Test-Path -LiteralPath $checksumPath)) {
@@ -82,6 +88,7 @@ if ((Test-Path -LiteralPath $archivePath) -or (Test-Path -LiteralPath $checksumP
 
 # Compress-Archive can omit hidden files. The .NET API preserves the entire
 # publish tree, including the private .playwright driver, at the archive root.
+if ($windowsPayload) {
 [IO.Compression.ZipFile]::CreateFromDirectory($publishRoot, $archivePath, [IO.Compression.CompressionLevel]::Optimal, $false)
 $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
@@ -104,6 +111,13 @@ try {
 }
 finally {
     $archive.Dispose()
+}
+} else {
+    if (![OperatingSystem]::IsLinux()) { throw 'Create the Linux tarball on Linux to preserve executable permissions.' }
+    & tar -czf $archivePath -C $publishRoot .
+    if ($LASTEXITCODE -ne 0) { throw 'Tarball creation failed.' }
+    & tar -dzf $archivePath -C $publishRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Tarball verification failed.' }
 }
 
 $algorithm = [Security.Cryptography.SHA256]::Create()

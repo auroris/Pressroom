@@ -498,14 +498,21 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
             creatingDriver = Playwright.CreateAsync();
             playwright = await BoundAsync(creatingDriver, token);
             driver = OwnedDriverProcess.Capture(before, _nodePath!);
-            browser = await BoundAsync(playwright.Chromium.LaunchAsync(new()
+            try
             {
-                Headless = true,
-                ChromiumSandbox = _settings.ChromiumSandbox,
-                ExecutablePath = string.IsNullOrWhiteSpace(_settings.ChromiumPath) ? null : RuntimePaths.ResolveApplicationPath(_settings.ChromiumPath),
-                Timeout = _settings.MaxTimeoutMs
-                // No Channel: the packaged default is Chromium headless shell.
-            }), token);
+                browser = await BoundAsync(playwright.Chromium.LaunchAsync(new()
+                {
+                    Headless = true,
+                    ChromiumSandbox = _settings.ChromiumSandbox,
+                    ExecutablePath = string.IsNullOrWhiteSpace(_settings.ChromiumPath) ? null : RuntimePaths.ResolveApplicationPath(_settings.ChromiumPath),
+                    Timeout = _settings.MaxTimeoutMs
+                    // No Channel: the packaged default is Chromium headless shell.
+                }), token);
+            }
+            catch (PlaywrightException) when (OperatingSystem.IsLinux() && _settings.ChromiumSandbox)
+            {
+                throw new InvalidOperationException("Sandboxed Chromium could not start. Install the documented Linux shared libraries and fonts; permit unprivileged user namespaces (kernel.unprivileged_userns_clone where present), the host AppArmor policy, and the container seccomp profile in docs/linux.md. Sandboxing must remain enabled.");
+            }
             driver.TrackBrowserChildren();
             generation = new Generation(playwright, browser, driver, TimeSpan.FromMilliseconds(_settings.CleanupTimeoutMs));
             lock (_state) _generation = generation;
@@ -738,6 +745,7 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
 
         private async Task<bool> StopCoreAsync()
         {
+            driver.TrackBrowserChildren();
             try
             {
                 var closing = Browser.CloseAsync();

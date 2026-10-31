@@ -6,6 +6,7 @@ the committed `packages.lock.json` files and each published `release-manifest.js
 
 | Component | Upstream and license information | Files retained in the release |
 |---|---|---|
+| Container seccomp profile | [moby/profiles](https://github.com/moby/profiles), Apache-2.0; modified to permit Chromium user namespaces and pidfd cleanup | `deploy/LICENSE.moby`, provenance in `deploy/README.md` |
 | Microsoft.Playwright and its JavaScript driver | [microsoft/playwright-dotnet](https://github.com/microsoft/playwright-dotnet), [microsoft/playwright](https://github.com/microsoft/playwright); Apache-2.0 | `.playwright/package/LICENSE`, driver third-party notices, NuGet metadata/notices |
 | Private Node.js runtime | [nodejs/node](https://github.com/nodejs/node); MIT plus bundled dependency licenses | `.playwright/node/LICENSE` |
 | Chromium headless shell | [Chromium](https://www.chromium.org/); BSD-style and component-specific licenses | Entire installer-provided browser tree, including license/credit resources |

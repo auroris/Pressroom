@@ -9,6 +9,8 @@ public sealed class PrintingSettings
 
     public void Validate()
     {
+        if (!OperatingSystem.IsWindows() && (Printers?.Count > 0 || !string.IsNullOrWhiteSpace(SumatraPdfPath)))
+            throw new InvalidOperationException("Printing is available on Windows only. Leave Printing:Printers empty and Printing:SumatraPdfPath unset on Linux.");
         if (Printers is null || Printers.Any(pair => !RequestValidator.IsPrinterIdentifier(pair.Key)
             || string.IsNullOrWhiteSpace(pair.Value) || pair.Value.Length > 256 || pair.Value.Any(char.IsControl)))
             throw new InvalidOperationException("Printing:Printers must map identifiers of 1–128 ASCII letters, digits, hyphens, or underscores to Windows printer names of 1–256 characters.");

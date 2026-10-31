@@ -1,0 +1,20 @@
+services:
+  pressroom:
+    image: ghcr.io/auroris/pressroom:${PRESSROOM_VERSION:?Select a release version}
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./pressroom-seccomp.json
+    cap_drop: [ALL]
+    shm_size: 1gb
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    mem_limit: 1536m
+    cpus: 1
+    volumes:
+      - ./pressroom.settings.json:/etc/pressroom/pressroom.settings.json:ro
+      - pressroom-state:/var/lib/pressroom
+volumes:
+  pressroom-state:

@@ -1,5 +1,11 @@
 # Deployment on Windows and IIS
 
+For Linux/systemd see [Linux](linux.md); for Docker, Compose or Kubernetes see
+[Containers](container.md). With jobs enabled, provision MaxStoredBytes plus one
+result commit, logs and temp space. Run one instance per state root and disable
+IIS overlapped recycling for the local job store: stop the old worker before its
+replacement starts, or the store lock rejects the second instance.
+
 A Pressroom release is one folder. Deploying it means provisioning IIS once, then
 copying the folder into place for every update. The application never downloads
 browsers, restores packages, or installs Windows features at run time.

@@ -6,6 +6,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Pressroom.Client/Pressroom.Client.csproj" />
     <ProjectReference Include="../../src/Pressroom.Server/Pressroom.Server.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
     <PackageReference Include="xunit.v3" Version="4.0.2" />

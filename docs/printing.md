@@ -1,5 +1,10 @@
 # Printing to Windows printers
 
+Printing is Windows-only. On Linux leave `Printing:Printers` empty and
+`Printing:SumatraPdfPath` unset; configuring either fails startup. Printer
+discovery follows the configured access mode and returns an empty list on Linux.
+A render or job request with `printer` returns 400 with a Windows-only detail.
+
 Besides returning PDFs, Pressroom can render a document and hand the pages to an
 allowlisted Windows printer. Printing reuses the normal render request: add a
 `printer` identifier, authenticate with an API key, and receive a JSON submission

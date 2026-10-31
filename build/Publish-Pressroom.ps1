@@ -14,8 +14,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-if ($env:OS -ne 'Windows_NT' -or ![Environment]::Is64BitProcess) {
-    throw 'Pressroom release publishing requires a 64-bit Windows build process.'
+$onWindows = $env:OS -eq 'Windows_NT'
+$runtimeIdentifier = if ($onWindows) { 'win-x64' } else { 'linux-x64' }
+$pathComparison = if ($onWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+if (![Environment]::Is64BitProcess) {
+    throw 'Pressroom release publishing requires a 64-bit build process.'
 }
 
 function Get-FullDirectory([string]$Path) {
@@ -41,7 +44,7 @@ function Remove-ValidationMarkers([string]$Directory) {
 
 function Get-RelativeFile([string]$Root, [string]$Path) {
     $prefix = $Root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if (!$Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    if (!$Path.StartsWith($prefix, $pathComparison)) {
         throw 'A publish input resolved outside its working directory.'
     }
     return $Path.Substring($prefix.Length).Replace('\', '/')
@@ -68,9 +71,12 @@ function Get-Sha256Hash([string]$Path) {
 
 $BuildDirectory = Get-FullDirectory $BuildDirectory
 $BundleDirectory = Get-FullDirectory $BundleDirectory
-$node = Join-Path $BuildDirectory '.playwright\node\win32_x64\node.exe'
-$cli = Join-Path $BuildDirectory '.playwright\package\cli.js'
-$driverMetadata = Join-Path $BuildDirectory '.playwright\package\package.json'
+$nodeRelative = if ($onWindows) { '.playwright/node/win32_x64/node.exe' } else { '.playwright/node/linux-x64/node' }
+$shellName = if ($onWindows) { 'chrome-headless-shell.exe' } else { 'chrome-headless-shell' }
+$serverName = if ($onWindows) { 'Pressroom.Server.exe' } else { 'Pressroom.Server' }
+$node = Join-Path $BuildDirectory $nodeRelative
+$cli = Join-Path $BuildDirectory '.playwright/package/cli.js'
+$driverMetadata = Join-Path $BuildDirectory '.playwright/package/package.json'
 $depsPath = Join-Path $BuildDirectory 'Pressroom.Server.deps.json'
 Require-File $node
 Require-File $cli
@@ -100,7 +106,7 @@ if ($Mode -eq 'Prepare') {
     finally {
         $env:PLAYWRIGHT_BROWSERS_PATH = $previousBrowserPath
     }
-    $headless = @(Get-ChildItem -LiteralPath $browserDirectory -Recurse -File -Filter 'chrome-headless-shell.exe')
+    $headless = @(Get-ChildItem -LiteralPath $browserDirectory -Recurse -File -Filter $shellName)
     if ($headless.Count -ne 1) { throw 'The bundled browser tree must contain exactly one matching Chromium headless shell.' }
     Remove-ValidationMarkers $browserDirectory
 
@@ -108,30 +114,35 @@ if ($Mode -eq 'Prepare') {
     # browser, private Node/driver, and font notices already copied with their files.
     if ([string]::IsNullOrWhiteSpace($NuGetRoot)) { $NuGetRoot = $env:NUGET_PACKAGES }
     if ([string]::IsNullOrWhiteSpace($NuGetRoot)) {
-        $NuGetRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget\packages'
+        $NuGetRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget/packages'
     }
     $NuGetRoot = [IO.Path]::GetFullPath($NuGetRoot)
     $noticeRoot = Join-Path $BundleDirectory 'notices'
     if (Test-Path -LiteralPath $noticeRoot) { Remove-Item -LiteralPath $noticeRoot -Recurse -Force }
     [IO.Directory]::CreateDirectory($noticeRoot) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD-PARTY-NOTICES.md') -Destination $noticeRoot
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\README.md') -Destination (Join-Path $BundleDirectory 'README.md') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../THIRD-PARTY-NOTICES.md') -Destination $noticeRoot
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../README.md') -Destination (Join-Path $BundleDirectory 'README.md') -Force
     $releaseDocs = Join-Path $BundleDirectory 'docs'
     [IO.Directory]::CreateDirectory($releaseDocs) | Out-Null
     # Ship the user and integrator guides with the release; the design history stays in the repository.
-    Copy-Item -Path (Join-Path $PSScriptRoot '..\docs\*.md') -Destination $releaseDocs -Force
+    Copy-Item -Path (Join-Path $PSScriptRoot '../docs/*.md') -Destination $releaseDocs -Force
     $releaseImages = Join-Path $releaseDocs 'images'
     [IO.Directory]::CreateDirectory($releaseImages) | Out-Null
-    Copy-Item -Path (Join-Path $PSScriptRoot '..\docs\images\*') -Destination $releaseImages -Force
+    Copy-Item -Path (Join-Path $PSScriptRoot '../docs/images/*') -Destination $releaseImages -Force
+    $releaseDeploy = Join-Path $BundleDirectory 'deploy'
+    [IO.Directory]::CreateDirectory($releaseDeploy) | Out-Null
+    foreach ($example in @('README.md', 'compose.yaml', 'kubernetes.yaml', 'pressroom-seccomp.json', 'check.settings.json', 'LICENSE.moby')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../deploy/' + $example)) -Destination $releaseDeploy -Force
+    }
     $inventory = @()
     foreach ($entry in $deps.libraries.PSObject.Properties | Sort-Object Name) {
         if ($entry.Value.type -ne 'package') { continue }
         $parts = $entry.Name.Split('/')
-        $packagePath = Join-Path $NuGetRoot ($parts[0].ToLowerInvariant() + '\' + $parts[1].ToLowerInvariant())
+        $packagePath = Join-Path $NuGetRoot ($parts[0].ToLowerInvariant() + '/' + $parts[1].ToLowerInvariant())
         if (!(Test-Path -LiteralPath $packagePath -PathType Container)) {
             throw "The restored package directory is missing for $($entry.Name)."
         }
-        $packageNoticeRoot = Join-Path $noticeRoot ('packages\' + $parts[0] + '\' + $parts[1])
+        $packageNoticeRoot = Join-Path $noticeRoot ('packages/' + $parts[0] + '/' + $parts[1])
         [IO.Directory]::CreateDirectory($packageNoticeRoot) | Out-Null
         $nuspec = @(Get-ChildItem -LiteralPath $packagePath -File -Filter '*.nuspec')
         if ($nuspec.Count -ne 1) { throw "Package metadata is missing for $($entry.Name)." }
@@ -166,14 +177,14 @@ if ($Mode -eq 'Prepare') {
 
 # A warm-up failure is a publish failure. Use an isolated settings/state directory,
 # and make the child process use only the payload being verified.
-$executable = Join-Path $BuildDirectory 'Pressroom.Server.exe'
+$executable = Join-Path $BuildDirectory $serverName
 $browserDirectory = Join-Path $BuildDirectory 'browsers'
-$fontManifest = Join-Path $BuildDirectory 'fonts\manifest.json'
+$fontManifest = Join-Path $BuildDirectory 'fonts/manifest.json'
 Require-File $executable
 Require-File $fontManifest
-Require-File (Join-Path $BuildDirectory 'fonts\OFL.txt')
-Require-File (Join-Path $BuildDirectory '.playwright\node\LICENSE')
-Require-File (Join-Path $BuildDirectory '.playwright\package\LICENSE')
+Require-File (Join-Path $BuildDirectory 'fonts/OFL.txt')
+Require-File (Join-Path $BuildDirectory '.playwright/node/LICENSE')
+Require-File (Join-Path $BuildDirectory '.playwright/package/LICENSE')
 if (!(Test-Path -LiteralPath $browserDirectory -PathType Container)) { throw 'The staged browser payload is missing.' }
 $checkRoot = Join-Path ([IO.Path]::GetTempPath()) ('Pressroom-publish-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($checkRoot) | Out-Null
@@ -210,7 +221,8 @@ try {
     if (!$check.WaitForExit(180000)) {
         # This PID was created by this check and is still running. Terminate only
         # its process tree, never all node/chrome processes on the build machine.
-        & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $check.Id /T /F | Out-Null
+        if ($onWindows) { & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $check.Id /T /F | Out-Null }
+        else { $check.Kill($true) }
         throw 'The Pressroom package check did not finish within three minutes.'
     }
     $stdout = $stdoutTask.GetAwaiter().GetResult()
@@ -247,7 +259,7 @@ try {
         product = 'Pressroom'
         version = $result.version
         createdUtc = [DateTime]::UtcNow.ToString('o')
-        runtimeIdentifier = 'win-x64'
+        runtimeIdentifier = $runtimeIdentifier
         selfContained = ($SelfContained -eq 'true')
         playwrightVersion = $playwrightVersion
         driverVersion = $driver.version

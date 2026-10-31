@@ -14,7 +14,9 @@ public static class ApplicationConfiguration
         var explicitFile = !string.IsNullOrWhiteSpace(selected);
         var external = explicitFile
             ? Path.GetFullPath(selected!, applicationDirectory)
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Pressroom", "pressroom.settings.json");
+            : OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Pressroom", "pressroom.settings.json")
+                : "/etc/pressroom/pressroom.settings.json";
         configuration.AddJsonFile(external, optional: !explicitFile, reloadOnChange: false);
     }
 

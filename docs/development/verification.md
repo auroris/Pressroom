@@ -1,5 +1,94 @@
 # Verification record
 
+## Packages, Linux, containers and jobs — 2026-10-31
+
+The four roadmap items are implemented in the working tree. **Nothing was
+published to nuget.org or a container registry.** The release workflow defaults
+`publish_nuget` to false. Linux and container qualification remain pending a real
+Linux host; the checklist in [Linux acceptance](../linux-acceptance.md) is unfilled.
+
+### Windows build and automated checks
+
+- Locked solution restore passed, including a prerelease version override.
+- Release build with `ContinuousIntegrationBuild=true`: zero warnings or errors.
+- Real-browser .NET 10 solution run: **203 passed, zero failed, two skipped**.
+  The skips are the Linux process-ownership and Linux HTTP/printing tests.
+  Counts are 63 contract/client, 27 renderer and 113 server tests passed.
+- The same 63 contract/client tests passed on .NET 8.0.33.
+- Toolchain: .NET SDK 10.0.403, .NET/ASP.NET Core 10.0.14,
+  Playwright 1.64.1, private Node v24.22.1, bundled Chromium 156.0.8078.4.
+  Chromium sandboxing and normal dependency validation remained enabled.
+- The IIS folder publish completed its isolated PDF warm-up. ZIP packaging
+  validated 505 files, including the private driver and deployment examples.
+  Local artifact: `artifacts/roadmap-release-final/Pressroom-0.1.0-win-x64-framework-dependent.zip`.
+  SHA-256: `7a3417b980f25a1964d15e78697dc5c2cca9b22fbb50b5a646fca8c9af099b81`.
+- PowerShell build helpers parsed, release YAML passed actionlint v1.7.12,
+  OpenAPI/seccomp JSON parsed, and `git diff --check` passed.
+
+These checks do not establish a clean Windows Server installation, an IIS
+application-pool deployment, a new self-contained release or Visual Studio UI
+behavior. Existing acceptance checks still apply.
+
+### NuGet packages
+
+Both packages pack for net8.0 and net10.0, with portable symbols. ZIP/PE/PDB
+inspection verified the README, PNG icon, MIT metadata, deterministic PE marker
+and Source Link mappings to this repository. Local uncommitted source is not a
+published Git commit; remote Source Link resolution requires the eventual
+committed CI build. API-baseline validation must start with the first published
+stable version rather than a fictional baseline.
+
+Fresh web API consumers installed the local packages, compiled the DI example
+and rendered a one-page PDF on each runtime. The reusable helper uses a private
+package cache and source mapping: Pressroom packages must come from the local
+feed, while missing Microsoft targeting packs may come from nuget.org.
+`dotnet nuget verify` reports NU3004 for these unsigned local packages, as
+expected. Repository signature verification remains a post-publication check.
+
+### Jobs and scheduling
+
+The ordinary suite covers ownership, idempotency, validation, transitions,
+cancellation, result streaming, quotas, retention, Windows storage ACLs,
+round-robin scheduling, reserved sync capacity, IIS base-path links and client
+batch errors. The real-browser integration test renders 50 documents with eight
+client operations in flight while sync requests continue.
+
+The extended run completed **500 batch documents and 501 successful sync
+renders**. Successful sync-request p95 was **304.0 ms idle / 428.6 ms busy**
+(**1.41×**), with no sync 429. Two planned-recycle 503 responses were counted
+separately and handled by the test load generator, preserving the existing API
+contract. Public client methods do not silently retry failed renders. Metrics
+are saved locally in `artifacts/jobs-acceptance.json`.
+
+A store/scheduler restart test using a renderer substitute rebuilt 100 queued
+jobs, completed all 100, and retained one previously rendering job as
+`failed/interrupted`. This verifies durable index recovery and scheduling, not
+the full process-restart/HTTP-client acceptance scenario. That deployment
+scenario remains on the acceptance checklist.
+
+### Linux and container gates
+
+Linux process-tree termination, printing rejection, Unix storage permissions,
+tarball executable modes, native library compatibility, sandbox policies,
+shutdown, font output and soak tests have **not been executed on Linux in this
+pass**. The Docker/Compose/Kubernetes definitions and helpers are prepared, but
+no image was built, scanned, sized or published here. The release workflow
+requires non-root sandboxed publish/browser checks, final-image HTTP/shutdown
+smoke checks, an SPDX SBOM and a critical-CVE scan before pushing an image.
+The image uses pinned official .NET 10 Ubuntu 24.04 bases; Debian 13 remains a
+separate host-deployment target. Docker builds omit Git history, so Source Link
+warnings are expected there; NuGet symbols are built separately from a checkout.
+
+### Windows firewall prompts
+
+Isolation tests deliberately exercise network APIs, including WebRTC probes.
+Windows may prompt when a newly located headless-shell executable opens a socket.
+The tests passed with the existing executable-scoped inbound block rules. No
+inbound allow rule is required. Reuse the same browser path, or optionally run
+`build/Block-TestBrowserInbound.ps1` as administrator for that exact executable.
+This helper is never called by build, test or publish. No firewall policy was
+changed during this work, and no production browser flags were weakened.
+
 ## API-key JavaScript permission — 2026-10-24
 
 Each `Auth:ApiKeys` entry is now an object with `Secret` and optional

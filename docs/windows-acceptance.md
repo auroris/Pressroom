@@ -156,6 +156,20 @@ the configured access mode, and a PDF after each operation. Keep configuration, 
 temporary state outside the replaceable site directory. A partial file-copy or
 warm-up failure must not be treated as a successful deployment.
 
+## Optional asynchronous jobs
+
+- Submit 500 documents through RenderManyAsync while measuring concurrent sync
+  p95; target at most twice idle latency with no additional sync 429s.
+- Restart with 100 queued and one active job. Queued work resumes; one interrupted
+  render fails/retryable. Printing interruption needs Windows spooler review.
+- Verify two keys cannot list/read/download/delete each other's jobs.
+- Exercise global/per-key queues, disk quota, cancellation, expiry and
+  delete-on-download. Expired content disappears within two sweeper intervals;
+  an active download retains its open file until its stream closes.
+- Inspect protected service-SID ACLs, metadata-only logs, and the instance lock.
+- Disable overlapped IIS recycling for local storage; test stop/start updates and
+  rollback without replacing the jobs directory.
+
 ## Result
 
 Record **passed**, **failed**, or **not run** for each area, with the exact artifact,

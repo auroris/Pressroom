@@ -54,7 +54,7 @@ document error, the context is closed, and later renders remain usable.
 
 ## Retention and logging
 
-- PDF-only requests do not deliberately store input HTML or output PDFs. Renders
+- Synchronous PDF-only requests do not deliberately store input HTML or output PDFs. Renders
   write no PDF file; the page count is read from the in-memory document.
 - Printer requests write the PDF to a private job directory under
   `<StateRoot>\temp` for SumatraPDF and remove it after submission. The Windows
@@ -65,6 +65,25 @@ document error, the context is closed, and later renders remain usable.
   caller on 422 are bounded.
 - Chromium may create temporary files in its private working directory, and the
   operating system may page memory. Pressroom does not claim zero disk writes.
+
+## Job storage and containers
+
+With jobs enabled, HTML/PDFs live under `<StateRoot>/jobs/<id>` for configured
+retention. Linux uses 0700 directories/0600 files; Windows uses a protected
+service-SID DACL. Use volume encryption for encryption at rest. Successful jobs
+remove HTML; failed input and results follow [retention settings](configuration.md).
+Storage is locked to one instance. Queued jobs survive restart; active jobs become
+failed/interrupted. Interrupted printing may have reached the Windows spooler.
+
+Owners are API key identifiers. Rotating a secret under the same identifier keeps
+access; reusing an identifier grants access to its prior jobs. Other keys get 404
+and cannot list those jobs. Anonymous jobs share one principal: any anonymous
+caller can list and retrieve them, including callers who know an ID. Prefer
+API-key mode. Cancellation cannot retract already-spooled pages.
+
+Containers add a non-root identity and read-only root with writable state volume.
+Egress policy still belongs to a firewall or NetworkPolicy. No callbacks or
+outbound job delivery are implemented. Job logs remain metadata only.
 
 ## Resource protection
 

@@ -10,7 +10,7 @@ line arguments other than `--config` and `--check` are not application settings.
 
 | Rule | Behaviour |
 |---|---|
-| Default location | The operating system's common application data folder, normally `C:\ProgramData\Pressroom\pressroom.settings.json` |
+| Default location | `C:\ProgramData\Pressroom\pressroom.settings.json` on Windows; `/etc/pressroom/pressroom.settings.json` on Linux |
 | Choosing another file | Set `ConfigurationFile` in `appsettings.json`, or pass `--config <path>` on the command line for local runs and package checks |
 | Relative paths | Resolve from the application directory |
 | Missing file | Allowed when no file is explicitly selected; an explicitly selected file must exist |
@@ -66,9 +66,10 @@ explicitly:
 
 Anonymous mode admits rendering, service information, and the OpenAPI document
 without a key. A supplied invalid key still returns 401. Anonymous renders always
-have JavaScript disabled, and anonymous callers cannot print or list printers; a
+have JavaScript disabled, and anonymous callers cannot print or list Windows printers; a
 caller in anonymous mode may still present a valid configured key to use those
-permissions.
+permissions. Linux printer discovery returns an empty list under the configured
+authentication mode.
 
 Windows authentication and domain group checks are not supported. Under IIS,
 enable Anonymous Authentication and disable Windows Authentication; Pressroom
@@ -109,7 +110,7 @@ clients cannot accumulate unbounded buffered PDFs.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `Paths:StateRoot` | Common application data + `Pressroom` | Writable runtime root. Pressroom uses `temp` (per-instance working files and print jobs) and `logs` beneath it |
+| `Paths:StateRoot` | Common application data + `Pressroom` on Windows; `/var/lib/pressroom` on Linux | Writable root for `temp`, `logs`, and opt-in `jobs` |
 | `Fonts:Manifest` | `fonts/manifest.json` | Packaged font definitions; part of the release |
 
 Use a literal absolute path for `Paths:StateRoot`, such as `C:\ProgramData\Pressroom`.
@@ -139,12 +140,46 @@ URLs, or page console text. Arbitrary Serilog sink settings are not loaded.
 and underscores, matched ignoring case) to exact Windows printer names. No printer
 is enabled by default. See the [Printing guide](printing.md) for the full setup.
 
+## Asynchronous jobs
+
+Enable with `"Jobs": { "Enabled": true }`. This introduces HTML/PDF storage.
+Use one instance per state root. JSON time spans use `hh:mm:ss` or `d.hh:mm:ss`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `Jobs:Enabled` | `false` | Enable endpoints, scheduler and store |
+| `Jobs:Workers` | `1` | Active jobs; at most Concurrency minus ReservedSyncSlots |
+| `Jobs:ReservedSyncSlots` | `1` | At least one sync slot; below Concurrency when jobs are enabled |
+| `Jobs:MaxQueued` | `200` | Global waiting-job limit, 1–100000 |
+| `Jobs:MaxQueuedPerKey` | `100` | Per-owner waiting limit, at most MaxQueued |
+| `Jobs:MaxQueueAge` | `00:10:00` | Queue wait before expiry |
+| `Jobs:ResultRetention` | `01:00:00` | Completed metadata/PDF lifetime; also the additional tombstone lifetime |
+| `Jobs:RequestRetention` | `01:00:00` | Failed HTML retention, bounded by job expiry |
+| `Jobs:MaxStoredBytes` | `2147483648` | 2 GiB, including 16 KiB metadata reserve/job; allowed 1 MiB–1 TiB |
+| `Jobs:DeleteResultOnDownload` | `false` | Delete after the first complete successful download |
+
+All durations must be one second to 30 days. Queue limits exclude active jobs.
+Sync waiters take priority; background jobs never consume reserved slots.
+Job rendering deadlines start at dispatch, excluding queue time.
+
+Admission returns 429/Retry-After on queue/quota pressure. An oversized result
+fails with `storage_full`. Serialized atomic writes may temporarily use one extra
+result's space. Counters include metadata reserve, not filesystem allocation;
+logs and temporary browser files are outside this budget.
+
+Sweeping runs on startup, admission/reads, and every minute. Success removes HTML
+immediately. Failed HTML expires at RequestRetention or job expiry, whichever
+comes first. Expired content is deleted; tombstones last one additional
+ResultRetention window before IDs return 404. Active downloads pin their file
+until the stream closes. Disabling jobs stops sweeping old storage; drain/delete
+jobs before disabling if retention must continue.
+
 ## Startup validation
 
 Pressroom refuses to start, and `--check` fails, on invalid limits, missing packaged
 assets, an unusable `StateRoot`, an unknown `Auth:Mode`, invalid key entries,
 duplicate secrets, API-key mode without keys, or unknown properties under `Auth`
-and `Printing`. Startup also verifies that the launched browser actually enforces
+and `Printing`/`Jobs`. Startup also verifies that the launched browser actually enforces
 its connection policy and fails if it does not, including for an executable
 override.
 

@@ -1,20 +1,17 @@
 # .NET client
 
-`Pressroom.Client` is a small HTTP client for .NET 10 applications. It depends only
+`Pressroom.Client` is a small HTTP client for .NET 8 and .NET 10 applications. It depends only
 on `Pressroom.Contracts` and the base class library, so referencing it adds no
 Playwright or Chromium dependency to your application. Any HTTP client in any
 language can call the [API](api.md) directly; this library saves you the request
 plumbing, validation, and error mapping.
 
-## Referencing the projects
+## Installing the package
 
-Both projects live under `src/` and target `net10.0`. Add project references, or
-build and reference the assemblies:
+Install the package matching the server release (use `--version` for a prerelease):
 
-```xml
-<ItemGroup>
-  <ProjectReference Include="..\Pressroom\src\Pressroom.Client\Pressroom.Client.csproj" />
-</ItemGroup>
+```sh
+dotnet add package Pressroom.Client
 ```
 
 `Pressroom.Contracts` holds the request and option records, `IPdfRenderer`, the
@@ -112,6 +109,50 @@ PrintJobResult job = await pressroom.PrintAsync(new RenderRequest
 
 The client never retries a print job. See [Printing](printing.md) for what
 `submitted` does and does not mean.
+
+## Batch rendering
+
+Enable jobs on the server first. `SubmitAsync` accepts the same RenderRequest and
+an optional 1–128 character visible-ASCII idempotency key. The same key under the
+same caller returns the existing job for its retention window, even if a later
+request's body differs; choose a new key for new work.
+
+```csharp
+RenderJob job = await pressroom.SubmitAsync(request, "statement-10231", cancellationToken);
+RenderJob completed = await pressroom.WaitAsync(job.Id, cancellationToken, TimeSpan.FromMinutes(5));
+if (completed.Status == JobStatus.Succeeded && completed.Printer is null)
+{
+    RenderedPdf pdf = await pressroom.DownloadAsync(job.Id, cancellationToken);
+    await pressroom.CancelAsync(job.Id, cancellationToken); // delete the stored result early
+}
+```
+
+`WaitAsync` polls using Retry-After (fallback one second, bounded at ten seconds),
+returns any terminal job, and throws TimeoutException on maxWait. Cancellation or
+maxWait stops polling, not the server job. GetJobAsync reads state;
+ListJobsAsync reconciles the caller's jobs using status, limit and after.
+DownloadStreamAsync owns its HTTP response like RenderStreamAsync; dispose it.
+
+For PDF batches, bounded submission/polling/download/deletion is built in:
+
+```csharp
+await foreach (RenderManyResult item in pressroom.RenderManyAsync(requests, 8, cancellationToken))
+{
+    if (item.Error is { } error)
+    {
+        // Inspect StatusCode, Code and Retryable. Choose your own retry policy.
+        continue;
+    }
+    await File.WriteAllBytesAsync(item.Pdf!.FileName, item.Pdf.Bytes, cancellationToken);
+}
+```
+
+Results arrive in completion order and retain the original request. Exactly one
+of Pdf/Error is populated. The client never retries a failed submission or render.
+HTTP transport failures are surfaced as a `transport` error with unknown
+retryability; reconcile jobs before resubmitting. Early enumeration disposal or
+cancellation stops local work, leaving acknowledged jobs available on the server.
+Use SubmitAsync/WaitAsync for printer jobs, whose result is a receipt, not a PDF.
 
 ## Errors, retries, and fallback
 

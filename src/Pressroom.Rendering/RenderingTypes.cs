@@ -72,7 +72,7 @@ public sealed class PathsSettings
 {
     public string StateRoot { get; set; } = OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Pressroom")
-        : Path.Combine(Path.GetTempPath(), "Pressroom");
+        : "/var/lib/pressroom";
 }
 
 public static class RuntimePaths

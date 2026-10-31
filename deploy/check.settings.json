@@ -1,0 +1,4 @@
+{
+  "Paths": { "StateRoot": "/var/lib/pressroom" },
+  "Auth": { "Mode": "Anonymous" }
+}

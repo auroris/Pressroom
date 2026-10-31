@@ -1,7 +1,7 @@
 <h1 align="center">Pressroom</h1>
 
 <p align="center">
-  HTML in, PDF out. A self-contained HTML-to-PDF service for Windows and IIS.<br>
+  HTML in, PDF out. An HTML-to-PDF service for Windows, IIS, Linux, and containers.<br>
   An application <code>POST</code>s one complete HTML document; Pressroom returns print-quality PDF bytes,
   or sends the pages straight to an allowlisted Windows printer.
 </p>
@@ -13,6 +13,7 @@
   <img alt="Renderer: Chromium headless shell" src="docs/images/badge-renderer.svg">
   <img alt="Output: PDF or Windows printer" src="docs/images/badge-output.svg">
   <img alt="Client: .NET, HTTP-only" src="docs/images/badge-client.svg">
+  <a href="docs/container.md"><img alt="Container: Linux x64" src="https://img.shields.io/badge/container-linux--x64-245c78"></a>
   <a href="https://github.com/auroris/Pressroom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/auroris/Pressroom?label=release&color=2ea44f"></a>
 </p>
 
@@ -52,6 +53,10 @@ Chrome, no font installation, no downloads at run time.
   an offline `--check` self-test, and stop-copy-start upgrades with folder rollback.
 - **A .NET client without the browser.** `Pressroom.Client` is HTTP-only, so
   calling applications never take a Playwright dependency.
+- **Opt-in batch jobs.** Submit, poll, download or cancel durable jobs. Per-key
+  scheduling reserves capacity for interactive requests; local retention is bounded.
+- **Linux and containers.** Sandboxed Linux x64 packages, a non-root container,
+  and JSON-file configuration. See the pending [Linux acceptance](docs/linux-acceptance.md).
 
 ## Quick start
 
@@ -90,9 +95,16 @@ curl -sS -X POST http://localhost:5177/v1/render \
   --data-binary @samples/orders-bilingual.request.json -o orders.pdf
 ```
 
-Or from .NET:
+Or from .NET 8 or .NET 10:
+
+```sh
+dotnet add package Pressroom.Client
+```
 
 ```csharp
+using Pressroom.Client;
+using Pressroom.Contracts;
+
 var http = new HttpClient { BaseAddress = new Uri("https://pressroom.example/") };
 http.DefaultRequestHeaders.Add("X-Api-Key", configuration["Pressroom:ApiKey"]!);
 var pressroom = new PressroomClient(http);
@@ -126,6 +138,9 @@ the [Deployment guide](docs/deployment.md) covers the production IIS setup.
 | [Configuration](docs/configuration.md) | The external settings file, access modes and API keys, JavaScript permission, limits, paths, logging, and upgrade notes. |
 | [Printing](docs/printing.md) | SumatraPDF setup, the printer allowlist, submission receipts, error semantics, and local testing. |
 | [Deployment](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
+| [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, tarball packaging and rollback. |
+| [Containers](docs/container.md) | Sandboxed non-root image, Compose, Kubernetes, volumes, health and image verification. |
+| [Linux acceptance](docs/linux-acceptance.md) | Clean-host qualification checklist and pending deployment measurements. |
 | [Security model](docs/security.md) | Trust boundaries, document isolation controls, authentication, retention, resource protection, and what is not guaranteed. |
 | [Windows / IIS acceptance](docs/windows-acceptance.md) | The checklist shipped with each release for qualifying a target server. |
 | [Developing](docs/developing.md) | Repository layout, build and test, publishing from Visual Studio, the GitHub release workflow, and the design history. |

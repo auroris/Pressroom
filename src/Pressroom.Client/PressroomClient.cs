@@ -7,7 +7,7 @@ using Pressroom.Contracts;
 namespace Pressroom.Client;
 
 /// <summary>Uses a caller-owned HttpClient, whose BaseAddress ends with a slash.</summary>
-public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
+public sealed partial class PressroomClient(HttpClient httpClient) : IPdfRenderer
 {
     public async Task<RenderedPdf> RenderAsync(RenderRequest request, CancellationToken cancellationToken = default)
     {
@@ -86,8 +86,7 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
             throw await ReadFailureAsync(response, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != HttpStatusCode.Accepted || response.Content.Headers.ContentType?.MediaType != "application/json")
             throw new HttpRequestException("Pressroom returned an unexpected print response.");
-        await response.Content.LoadIntoBufferAsync(1024 * 1024, cancellationToken).ConfigureAwait(false);
-        var result = await response.Content.ReadFromJsonAsync<PrintJobResult>(JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
+        var result = JsonSerializer.Deserialize<PrintJobResult>(await ReadBoundedContentAsync(response.Content, cancellationToken).ConfigureAwait(false), JsonDefaults.Options);
         if (result is null || string.IsNullOrWhiteSpace(result.JobId) || result.Status != "submitted"
             || !string.Equals(result.Printer, request.Printer, StringComparison.OrdinalIgnoreCase) || result.PageCount < 1)
             throw new HttpRequestException("Pressroom returned an invalid print receipt.");
@@ -96,17 +95,19 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
 
     private static async Task<PressroomException> ReadFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        string? title = null, detail = null;
+        string? title = null, detail = null, code = null;
+        bool? retryable = null;
         Dictionary<string, string[]>? validationErrors = null;
         if (response.Content.Headers.ContentType?.MediaType == "application/problem+json")
         {
             // Native IIS errors need not be JSON. Do not replace the status with a JSON parsing exception.
             try
             {
-                await response.Content.LoadIntoBufferAsync(1024 * 1024, cancellationToken).ConfigureAwait(false);
-                using var problem = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false));
+                using var problem = JsonDocument.Parse(await ReadBoundedContentAsync(response.Content, cancellationToken).ConfigureAwait(false));
                 if (problem.RootElement.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String) title = t.GetString();
                 if (problem.RootElement.TryGetProperty("detail", out var d) && d.ValueKind == JsonValueKind.String) detail = d.GetString();
+                if (problem.RootElement.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String) code = c.GetString();
+                if (problem.RootElement.TryGetProperty("retryable", out var r) && r.ValueKind is JsonValueKind.True or JsonValueKind.False) retryable = r.GetBoolean();
                 if (problem.RootElement.TryGetProperty("errors", out var e) && e.ValueKind == JsonValueKind.Object)
                     validationErrors = e.Deserialize<Dictionary<string, string[]>>();
             }
@@ -116,7 +117,7 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
         var retryAfter = response.Headers.RetryAfter?.Delta;
         if (retryAfter is null && response.Headers.RetryAfter?.Date is { } date)
             retryAfter = TimeSpan.FromTicks(Math.Max(0, (date - DateTimeOffset.UtcNow).Ticks));
-        return new PressroomException(response.StatusCode, title ?? "Pressroom rejected the render request.", detail, validationErrors, retryAfter);
+        return new PressroomException(response.StatusCode, title ?? "Pressroom rejected the render request.", detail, validationErrors, retryAfter) { Code = code, Retryable = retryable };
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -125,6 +126,22 @@ public sealed class PressroomClient(HttpClient httpClient) : IPdfRenderer
         if (response.StatusCode == HttpStatusCode.ServiceUnavailable) return false;
         response.EnsureSuccessStatusCode();
         return true;
+    }
+
+    private static async Task<byte[]> ReadBoundedContentAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        const int limit = 1024 * 1024;
+        if (content.Headers.ContentLength > limit) throw new HttpRequestException("Pressroom JSON response exceeds 1 MiB.");
+        using var buffer = new MemoryStream();
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var chunk = new byte[8192];
+        int count;
+        while ((count = await stream.ReadAsync(chunk.AsMemory(0, (int)Math.Min(chunk.Length, limit + 1 - buffer.Length)), cancellationToken).ConfigureAwait(false)) != 0)
+        {
+            buffer.Write(chunk, 0, count);
+            if (buffer.Length > limit) throw new HttpRequestException("Pressroom JSON response exceeds 1 MiB.");
+        }
+        return buffer.ToArray();
     }
 
     private static long? ReadNumber(HttpResponseMessage response, string name)
@@ -141,4 +158,6 @@ public sealed class PressroomException(HttpStatusCode statusCode, string title, 
     public string? Detail { get; } = detail;
     public IReadOnlyDictionary<string, string[]>? Errors { get; } = errors;
     public TimeSpan? RetryAfter { get; } = retryAfter;
+    public string? Code { get; init; }
+    public bool? Retryable { get; init; }
 }

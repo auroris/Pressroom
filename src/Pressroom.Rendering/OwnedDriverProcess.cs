@@ -12,15 +12,14 @@ namespace Pressroom.Rendering;
 internal sealed class OwnedDriverProcess : IDisposable
 {
     private readonly Process _process;
-    private readonly DateTime _startTime;
-    private readonly List<(Process Process, DateTime Started)> _browserRoots = [];
+    private readonly LinuxProcessTree? _linux;
     private readonly WindowsProcessJob? _job;
 
     private OwnedDriverProcess(Process process)
     {
         _process = process;
-        _startTime = process.StartTime;
         if (OperatingSystem.IsWindows()) _job = new WindowsProcessJob(process);
+        else if (OperatingSystem.IsLinux()) _linux = new LinuxProcessTree(process.Id);
     }
 
     public static HashSet<int> SnapshotChildren() => ReadParents()
@@ -54,96 +53,16 @@ internal sealed class OwnedDriverProcess : IDisposable
         throw new InvalidOperationException("Pressroom could not identify its private Playwright driver process for reliable cleanup.");
     }
 
-    public void TrackBrowserChildren()
-    {
-        if (_job is not null) return; // The Windows kernel tracks every descendant, including orphans.
-        foreach (var pair in ReadParents().Where(pair => pair.Value == _process.Id))
-        {
-            try
-            {
-                var process = Process.GetProcessById(pair.Key);
-                _browserRoots.Add((process, process.StartTime));
-            }
-            catch (ArgumentException) { }
-            catch (InvalidOperationException) { }
-        }
-        if (_browserRoots.Count == 0)
-            throw new InvalidOperationException("Pressroom could not identify its launched browser process for reliable cleanup.");
-    }
+    public void TrackBrowserChildren() => _linux?.CaptureDescendants();
 
-    public async Task<bool> TerminateAsync(TimeSpan timeout)
-    {
-        if (_job is not null) return await _job.TerminateAsync(timeout);
-        var tracked = new List<(Process Process, DateTime Started)>();
-        try
-        {
-            var snapshotTime = DateTime.UtcNow;
-            var parents = ReadParents();
-            var descendants = new HashSet<int>();
-            if (!_process.HasExited && _process.StartTime == _startTime) descendants.Add(_process.Id);
-            foreach (var root in _browserRoots)
-                if (!root.Process.HasExited && root.Process.StartTime == root.Started) descendants.Add(root.Process.Id);
-            // The Linux development fallback cannot reconstruct orphan ownership once
-            // every recorded root has gone. Stay unavailable rather than claiming proof
-            // of a clean tree. Windows uses its kernel-owned job instead.
-            if (descendants.Count == 0) return false;
-            var changed = true;
-            while (changed)
-            {
-                changed = false;
-                foreach (var pair in parents)
-                    if (descendants.Contains(pair.Value) && descendants.Add(pair.Key)) changed = true;
-            }
-            foreach (var id in descendants)
-            {
-                try
-                {
-                    var process = Process.GetProcessById(id);
-                    // Reject a PID created after this ancestry snapshot; it could have
-                    // been recycled for an unrelated process in the meantime.
-                    if (process.StartTime.ToUniversalTime() > snapshotTime)
-                    {
-                        process.Dispose();
-                        return false;
-                    }
-                    var currentParents = ReadParents();
-                    if (!currentParents.TryGetValue(id, out var currentParent)
-                        || (!new[] { _process.Id }.Contains(id) && !descendants.Contains(currentParent)))
-                    {
-                        process.Dispose();
-                        return false;
-                    }
-                    tracked.Add((process, process.StartTime));
-                }
-                catch (ArgumentException) { }
-                catch (InvalidOperationException) { }
-            }
-
-            // Kill the known driver tree first, preventing it from creating more children.
-            if (!_process.HasExited && _process.StartTime == _startTime) _process.Kill(entireProcessTree: true);
-            foreach (var item in tracked)
-                if (!item.Process.HasExited && item.Process.StartTime == item.Started)
-                    item.Process.Kill(entireProcessTree: true);
-
-            using var cancellation = new CancellationTokenSource(timeout);
-            await Task.WhenAll(tracked.Select(item => item.Process.WaitForExitAsync(cancellation.Token)));
-            return true;
-        }
-        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or OperationCanceledException or NotSupportedException)
-        {
-            return false;
-        }
-        finally
-        {
-            foreach (var item in tracked) item.Process.Dispose();
-        }
-    }
+    public Task<bool> TerminateAsync(TimeSpan timeout)
+        => _job?.TerminateAsync(timeout) ?? _linux!.TerminateAsync(timeout);
 
     private static Dictionary<int, int> ReadParents()
     {
         if (OperatingSystem.IsWindows()) return ReadWindowsParents();
         if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("Pressroom supports Windows x64 deployment and Linux development.");
+            throw new PlatformNotSupportedException("Pressroom supports Windows x64 and Linux x64.");
         var result = new Dictionary<int, int>();
         foreach (var directory in Directory.EnumerateDirectories("/proc"))
         {
@@ -180,7 +99,7 @@ internal sealed class OwnedDriverProcess : IDisposable
     {
         _job?.Dispose(); // KILL_ON_JOB_CLOSE is also a process-exit safety net on Windows.
         _process.Dispose();
-        foreach (var root in _browserRoots) root.Process.Dispose();
+
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

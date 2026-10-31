@@ -6,6 +6,7 @@ using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
 using Pressroom.Server.Printing;
+using Pressroom.Server.Jobs;
 using Serilog;
 using Serilog.Events;
 
@@ -25,6 +26,8 @@ public partial class Program
                 var renderer = app.Services.GetRequiredService<BrowserRenderer>();
                 var settings = app.Services.GetRequiredService<IOptions<RenderSettings>>().Value;
                 ServerConfiguration.ValidateRenderSettings(settings);
+                app.Services.GetRequiredService<IOptions<PrintingSettings>>().Value.Validate();
+                app.Services.GetRequiredService<IOptions<JobsSettings>>().Value.Validate(settings);
                 using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(settings.MaxTimeoutMs));
                 try
                 {
@@ -83,6 +86,7 @@ public partial class Program
         builder.Services.AddOptions<FontsSettings>().BindConfiguration("Fonts");
         builder.Services.AddOptions<AuthSettings>().BindConfiguration("Auth", options => options.ErrorOnUnknownConfiguration = true);
         builder.Services.AddOptions<PrintingSettings>().BindConfiguration("Printing", options => options.ErrorOnUnknownConfiguration = true);
+        builder.Services.AddOptions<JobsSettings>().BindConfiguration("Jobs", options => options.ErrorOnUnknownConfiguration = true);
         builder.Services.AddSingleton<ServerConfiguration>();
         if (!check)
             builder.Services.AddHostedService<ConfigurationValidationService>();
@@ -143,6 +147,12 @@ public partial class Program
         builder.Services.AddSingleton<BrowserRenderer>();
         builder.Services.AddSingleton<IHtmlRenderer>(services => services.GetRequiredService<BrowserRenderer>());
         builder.Services.AddHostedService<BrowserLifecycleService>();
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<RenderCoordinator>();
+        builder.Services.AddSingleton<JobSubmissionGate>();
+        builder.Services.AddSingleton<IJobStore, LocalJobStore>();
+        builder.Services.AddSingleton<JobScheduler>();
+        if (!check) builder.Services.AddHostedService(services => services.GetRequiredService<JobScheduler>());
 
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -169,6 +179,7 @@ public partial class Program
         app.UseAuthentication();
         app.UseAuthorization();
         RenderEndpoints.Map(app);
+        JobEndpoints.Map(app);
         return app;
     }
 }

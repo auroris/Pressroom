@@ -2,11 +2,12 @@ using Microsoft.Extensions.Options;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Printing;
+using Pressroom.Server.Jobs;
 
 namespace Pressroom.Server.Infrastructure;
 
 public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOptions<AuthSettings> auth, IOptions<PathsSettings> paths,
-    IOptions<PrintingSettings> printing)
+    IOptions<PrintingSettings> printing, IOptions<JobsSettings> jobs)
 {
     public const long OuterBodyLimit = 32 * 1024 * 1024;
 
@@ -15,6 +16,7 @@ public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOption
         ValidateRenderSettings(render.Value);
         ValidateAuthSettings(auth.Value);
         printing.Value.Validate();
+        jobs.Value.Validate(render.Value);
         _ = ResolveStateRoot(paths.Value);
     }
 
@@ -34,6 +36,8 @@ public sealed class ServerConfiguration(IOptions<RenderSettings> render, IOption
     public static void ValidateRenderSettings(RenderSettings settings)
     {
         settings.Validate();
+        if (!settings.ChromiumSandbox)
+            throw new InvalidOperationException("Render:ChromiumSandbox must be true. On Linux enable unprivileged user namespaces and use the documented container seccomp profile.");
         if (settings.DefaultTimeoutMs < 100)
             throw new InvalidOperationException("Render:DefaultTimeoutMs must be at least 100 ms.");
         if (settings.MaxBodyBytes is < 1 or >= OuterBodyLimit)

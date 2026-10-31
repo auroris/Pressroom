@@ -12,6 +12,10 @@ on:
         description: Save as a draft instead of publishing immediately
         type: boolean
         default: false
+      publish_nuget:
+        description: Publish client packages to nuget.org after the server release
+        type: boolean
+        default: false
       prerelease:
         description: Mark as a prerelease (automatic for versions with a suffix)
         type: boolean
@@ -66,6 +70,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
+          dotnet-version: 8.0.x
           global-json-file: global.json
           cache: true
           cache-dependency-path: |
@@ -99,6 +104,17 @@ jobs:
           compression-level: 0
           retention-days: 14
           overwrite: true
+
+      - name: Test the packaged Windows browser
+        env:
+          PRESSROOM_RUN_BROWSER_TESTS: '1'
+          PRESSROOM_TEST_SANDBOX: 'true'
+          PRESSROOM_TEST_BROWSERS_PATH: ${{ github.workspace }}/artifacts/publish/IisFolder/browsers
+        run: |
+          dotnet test --project tests/Pressroom.Rendering.Tests -c Release --no-build --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Windows browser tests failed.' }
+          dotnet test --project tests/Pressroom.Server.Tests -c Release --no-build --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Windows jobs browser tests failed.' }
 
       # Use the verified local files directly; transferring them to a second
       # runner can take much longer than building and packaging the application.
@@ -154,3 +170,131 @@ jobs:
           gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. The verified assets remain in this workflow run.' }
           "Created release $tag from commit $env:GITHUB_SHA with the framework-dependent Windows package and SHA-256 file." >> $env:GITHUB_STEP_SUMMARY
+
+  publish-packages:
+    name: Package and publish the .NET client
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - name: Restore, build, and test both client targets
+        run: |
+          dotnet restore tests/Pressroom.Contracts.Tests --locked-mode "-p:Version=$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Client restore failed.' }
+          dotnet build tests/Pressroom.Contracts.Tests -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
+          if ($LASTEXITCODE -ne 0) { throw 'Client build failed.' }
+          dotnet test --project tests/Pressroom.Contracts.Tests -c Release --no-build --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Client tests failed.' }
+      - name: Pack
+        run: |
+          foreach ($project in @('Pressroom.Contracts', 'Pressroom.Client')) {
+            dotnet pack "src/$project" -c Release --no-build --no-restore -o artifacts/nuget "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
+            if ($LASTEXITCODE -ne 0) { throw "Pack failed for $project." }
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-packages
+          path: artifacts/nuget/*
+          if-no-files-found: error
+      - name: Authenticate to nuget.org
+        if: ${{ inputs.publish_nuget && !inputs.draft }}
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        id: nuget
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish packages and symbols
+        if: ${{ inputs.publish_nuget && !inputs.draft }}
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: |
+          foreach ($project in @('Pressroom.Contracts', 'Pressroom.Client')) {
+            dotnet nuget push "artifacts/nuget/$project.$env:RELEASE_VERSION.nupkg" --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "NuGet publication failed for $project." }
+          }
+
+  container:
+    name: Verify Linux and release the container
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Permit user namespaces on this disposable CI host
+        shell: bash
+        run: |
+          # Ubuntu AppArmor's host policy otherwise denies Chromium's userns sandbox.
+          # Production hosts should use the executable-specific policy in docs/linux.md.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if test -f /proc/sys/kernel/unprivileged_userns_clone; then sudo sysctl -w kernel.unprivileged_userns_clone=1; fi
+      - name: Build and verify as an unprivileged user
+        run: ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION"
+      - name: Package the verified Linux folder
+        run: |
+          ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/container-publish -OutputDirectory artifacts/linux-release -Version $env:RELEASE_VERSION -Variant framework-dependent -RuntimeIdentifier linux-x64
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ghcr.io/auroris/pressroom:${{ inputs.version }}
+          format: spdx-json
+          output-file: artifacts/linux-release/pressroom.spdx.json
+          upload-release-assets: false
+      - name: Reject critical vulnerabilities
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87
+        with:
+          image-ref: ghcr.io/auroris/pressroom:${{ inputs.version }}
+          severity: CRITICAL
+          exit-code: '1'
+          format: table
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-release
+          path: artifacts/linux-release/*
+          if-no-files-found: error
+      - name: Attach Linux artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v$env:RELEASE_VERSION" (Get-ChildItem artifacts/linux-release -File).FullName --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Linux release upload failed.' }
+      - name: Push verified image
+        if: ${{ !inputs.draft }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $env:GH_TOKEN | docker login ghcr.io -u $env:GITHUB_ACTOR --password-stdin
+          if ($LASTEXITCODE -ne 0) { throw 'Registry login failed.' }
+          $image = "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION"
+          docker push $image
+          if ($LASTEXITCODE -ne 0) { throw 'Image push failed.' }
+          if (!$env:RELEASE_VERSION.Contains('-') -and $env:RELEASE_PRERELEASE -ne 'true') {
+            docker tag $image ghcr.io/auroris/pressroom:latest
+            docker push ghcr.io/auroris/pressroom:latest
+            if ($LASTEXITCODE -ne 0) { throw 'Latest tag push failed.' }
+          }
+          $digest = docker image inspect $image --format '{{index .RepoDigests 0}}'
+          $size = docker image inspect $image --format '{{.Size}}'
+          $notes = gh release view "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --json body --jq .body
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read release notes.' }
+          $notesPath = Join-Path $env:RUNNER_TEMP container-notes.md
+          $base = 'mcr.microsoft.com/dotnet/aspnet:10.0-noble@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee'
+          ($notes -join "`n") + "`n`nContainer: $digest`nRuntime base: $base`nUncompressed image size: $size bytes. SBOM attached; critical CVE gate passed.`n" | Set-Content $notesPath
+          gh release edit "v$env:RELEASE_VERSION" --repo $env:GITHUB_REPOSITORY --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'Could not record the image digest.' }

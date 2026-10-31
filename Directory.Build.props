@@ -8,6 +8,8 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Version>0.1.0</Version>
     <Authors>Pressroom</Authors>
+    <IsPackable>false</IsPackable>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <!-- Keep referenced projects on the same private driver platform during profile publishing. -->
     <PlaywrightPlatform Condition="'$(PublishProfile)' == 'IisFolder' or '$(PublishProfile)' == 'IisFolderSelfContained'">win-x64</PlaywrightPlatform>
   </PropertyGroup>

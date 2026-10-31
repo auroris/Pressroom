@@ -14,7 +14,7 @@ namespace Pressroom.Server.Tests;
 
 public sealed class PrintingTests
 {
-    [Theory]
+    [WindowsTheory]
     [InlineData(AuthMode.ApiKey)]
     [InlineData(AuthMode.Anonymous)]
     public async Task ValidKeyPrintsAndReturnsReceiptInsteadOfPdf(AuthMode mode)
@@ -32,7 +32,7 @@ public sealed class PrintingTests
         Assert.False(app.Renderer.LastRequest!.Options!.JavaScript);
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task AnonymousAndUnrelatedHostPrincipalsCannotPrintOrListPrinters(bool hostPrincipal)
@@ -47,7 +47,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData("")]
     [InlineData("wrong-secret")]
     [InlineData("duplicate")]
@@ -63,7 +63,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData("unknown")]
     [InlineData("")]
     [InlineData(" ")]
@@ -82,7 +82,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task PrinterDiscoveryRequiresKeyAndReturnsOnlyConfiguredIdentifiers()
     {
         using var app = new TestApplication(authMode: AuthMode.Anonymous);
@@ -92,7 +92,7 @@ public sealed class PrintingTests
         Assert.Equal("{\"printers\":[\"office\"]}", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task AnonymousOpenApiRetainsExplicitPrinterAuthenticationAndDocumentsReceipt()
     {
         using var app = new TestApplication(authMode: AuthMode.Anonymous);
@@ -106,7 +106,7 @@ public sealed class PrintingTests
         Assert.True(root.GetProperty("components").GetProperty("schemas").GetProperty("RenderRequest").GetProperty("properties").TryGetProperty("printer", out _));
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(false, HttpStatusCode.BadGateway)]
     [InlineData(true, HttpStatusCode.ServiceUnavailable)]
     public async Task PrintFailuresReturnProblemDetails(bool unavailable, HttpStatusCode status)
@@ -120,7 +120,7 @@ public sealed class PrintingTests
         Assert.Null(response.Content.Headers.ContentDisposition);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task PrintUsesDeadlineAndKeepsAdmissionSlotUntilItStops()
     {
         using var app = new TestApplication();
@@ -144,7 +144,7 @@ public sealed class PrintingTests
         Assert.Equal(HttpStatusCode.Accepted, next.StatusCode);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task RenderFailureDoesNotStartPrintingAndPdfRequestsDoNotPrint()
     {
         using var app = new TestApplication();
@@ -181,7 +181,7 @@ public sealed class PrintServiceTests : IDisposable
 {
     private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "pressroom-print-tests", Guid.NewGuid().ToString("N"));
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(0)]
     [InlineData(1)]
     public async Task HelperGetsExactConfiguredPrinterAndPrivatePdfThenCleansUp(int exitCode)
@@ -207,7 +207,7 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(_stateRoot, "temp")));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task CancellationCleansUpAndUnknownPrintersNeverLaunchHelper()
     {
         var service = Create(new StubRunner((_, _) => throw new OperationCanceledException()));
@@ -217,14 +217,14 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(_stateRoot, "temp")));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task MissingPrintHelperIsReportedAsUnavailable()
     {
         await Assert.ThrowsAsync<PrintUnavailableException>(() => new PrintProcessRunner().RunAsync(
             new ProcessStartInfo(Path.Combine(_stateRoot, "missing.exe")), TestContext.Current.CancellationToken));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task CleanupPreservesUnexpectedVirtualPrinterOutput()
     {
         string? savedOutput = null;
@@ -240,7 +240,7 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Single(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(savedOutput!)!));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task RunnerKillsTimedOutProcessBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -269,7 +269,7 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Throws<ArgumentException>(() => Process.GetProcessById(pid));
     }
 
-    [Fact]
+    [WindowsFact]
     public void PrinterConfigurationRejectsInvalidMappingsAndMissingExecutableSetting()
     {
         new PrintingSettings().Validate();

@@ -3,7 +3,7 @@
   "info": {
     "title": "Pressroom",
     "version": "v1",
-    "description": "Synchronous rendering of self-contained HTML to PDF. All resources must be inline or data URLs. The complete JSON body is limited to 25 MiB by default."
+    "description": "Synchronous rendering of self-contained HTML to PDF. All resources must be inline or data URLs. The complete JSON body is limited to 25 MiB by default. Opt-in durable jobs provide owner-scoped polling, downloads and cancellation. Anonymous jobs share an owner. Printing is Windows-only."
   },
   "security": [
     {
@@ -314,6 +314,291 @@
           }
         }
       }
+    },
+    "/v1/jobs": {
+      "post": {
+        "operationId": "submitJob",
+        "summary": "Submit a durable job (Jobs:Enabled required)",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[!-~]+$"
+            },
+            "description": "Same owner/key returns the retained first job; first body wins."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted durably",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Polling delay in seconds."
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or options",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Unknown, another owner, or jobs disabled"
+          },
+          "413": {
+            "description": "Body limit"
+          },
+          "415": {
+            "description": "Unsupported request format"
+          },
+          "429": {
+            "description": "Queue or storage capacity exhausted",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Polling delay in seconds."
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listJobs",
+        "summary": "List owned jobs newest first",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "rendering",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "expired"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of owned jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RenderJob"
+                      }
+                    },
+                    "nextAfter": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Unknown, another owner, or jobs disabled"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Job; Retry-After while nonterminal",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Polling delay in seconds."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Unknown, another owner, or jobs disabled"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelJob",
+        "responses": {
+          "204": {
+            "description": "Cancelled/deleted; repeated calls are idempotent while metadata exists"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Unknown, another owner, or jobs disabled"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}/result": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "downloadJob",
+        "responses": {
+          "200": {
+            "description": "Rendered PDF",
+            "headers": {
+              "X-Render-Pages": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Render-Duration-Ms": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "inline or attachment as requested, with a sanitized filename and UTF-8 filename*."
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Unknown, another owner, or jobs disabled"
+          },
+          "409": {
+            "description": "Not ready, failed, print job or concurrent download; Retry-After when temporary",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Polling delay in seconds."
+              }
+            }
+          },
+          "410": {
+            "description": "Expired or deleted result"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -578,6 +863,127 @@
           "pageCount": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "RenderJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "createdUtc",
+          "expiresUtc",
+          "fileName",
+          "disposition"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "rendering",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "createdUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expiresUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "queuePosition": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Submission-order estimate; scheduling rotates owners."
+          },
+          "pageCount": {
+            "type": "integer",
+            "nullable": true
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "inline",
+              "attachment"
+            ]
+          },
+          "printer": {
+            "type": "string",
+            "nullable": true
+          },
+          "printJob": {
+            "$ref": "#/components/schemas/PrintJobResult"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "errors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "properties": {
+              "self": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string"
+              }
+            }
           }
         }
       }

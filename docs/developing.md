@@ -9,8 +9,10 @@ lives. Integrators do not need any of this; start with
 
 - The .NET 10 SDK (`global.json` pins 10.0.100 with latest-feature roll-forward).
 - A Visual Studio release that supports .NET 10, for the publish profiles.
-- Windows x64 for publishing and release packaging. Building and running the unit
-  and API tests also works on Linux; real-browser tests need the browser payload.
+- The .NET 8 runtime for the second client test target.
+- Windows x64 for IIS publishing, or Linux x64 with PowerShell 7 and the
+  [documented libraries](linux.md) for Linux publishing. Real-browser tests need
+  the browser payload and sandbox support.
 
 ## Repository layout
 
@@ -39,6 +41,23 @@ dotnet test --solution Pressroom.slnx -c Release
 Unit and API tests use controlled renderer substitutes and run anywhere. The
 real-browser tests need the browser payload (publish once, see below) and writable
 temporary state. Ordinary **Build** and tests never download browsers.
+
+## Windows firewall prompts during browser tests
+
+Sandbox tests intentionally exercise local TCP/UDP/WebRTC sockets. Windows may
+prompt for a newly copied `chrome-headless-shell.exe` at each executable path.
+Choose Cancel/Block; Chromium needs no inbound network exception. Reuse the same
+browser bundle path for repeated tests. To prevent a first-use prompt, run this
+optional helper in an administrator PowerShell before testing that browser copy:
+
+```powershell
+./build/Block-TestBrowserInbound.ps1 -BrowserExecutable 'D:\path\to\chrome-headless-shell.exe'
+```
+
+It adds an inbound **block** rule for that exact executable on every profile.
+It does not grant access or disable the firewall, and is never run by publish or
+tests. A new browser path needs a separate rule. See Microsoft's
+[firewall rule behavior](https://learn.microsoft.com/windows/security/operating-system-security/network-security/windows-firewall/rules).
 
 ## Running locally
 
@@ -127,6 +146,50 @@ built-in token with repository write permission for the tag and release, and kee
 the ZIP and checksum as workflow artifacts for 14 days. See GitHub's
 [manual workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 for the required repository access.
+
+## Packages
+
+Contracts and Client target `net8.0;net10.0`. The server and renderer remain .NET 10
+and are not packable. The client tests run on both frameworks (install both runtimes).
+
+```sh
+dotnet restore Pressroom.slnx --locked-mode
+dotnet pack src/Pressroom.Contracts -c Release -o artifacts/nuget --no-restore
+dotnet pack src/Pressroom.Client -c Release -o artifacts/nuget --no-restore
+```
+
+Pass the same `-p:Version=1.2.3-rc.1` to restore, build and pack for a prerelease.
+Packages contain both target assemblies, a README, icon, MIT metadata, and portable
+PDBs in `.snupkg`. Source Link points at the build commit; CI normalizes build paths.
+Package validation checks framework compatibility. After the first stable release,
+set `PackageValidationBaselineVersion` in `build/ClientPackage.props` to that
+published version and refresh the lock files. Subsequent releases must pass that
+[API baseline](https://learn.microsoft.com/dotnet/fundamentals/apicompat/package-validation/baseline-version-validator).
+There is deliberately no fictional baseline before the first publication.
+
+The release workflow packs on Ubuntu only after the Windows release succeeds.
+Publication is opt-in with `publish_nuget` (default false); draft runs always
+preserve packages as artifacts without publishing them. Configure
+`NUGET_USER` and a nuget.org [trusted publishing policy](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing)
+for owner `auroris`, repository `Pressroom`, workflow `release.yml`, scoped to
+`Pressroom.Client` and `Pressroom.Contracts`. No permanent API key is needed.
+The workflow pushes symbols with the packages. `dotnet nuget verify` verifies
+signatures, not Source Link; local unsigned packages are expected to lack a
+repository signature until nuget.org signs them. Inspect Source Link in the PDB
+or NuGet Package Explorer; verify downloaded, repository-signed packages after release.
+
+`build/Test-ClientPackages.ps1 -ServerUrl http://127.0.0.1:5177/` creates fresh
+web API consumers for both targets, installs packages from `artifacts/nuget`,
+compiles the client example and renders against an anonymous loopback test server.
+Use `-Net8Dotnet` if the .NET 8 runtime is installed separately. Each run uses a
+private package cache so an older local package with the same version cannot mask
+a change.
+
+For the longer jobs acceptance run, enable the browser tests as above and set
+`PRESSROOM_JOB_ACCEPTANCE_COUNT=500`. Set `PRESSROOM_JOB_METRICS_PATH` to save
+successful sync-request p95 latency and planned-recycle 503 counts. The test
+requires a p95 ratio at most 2 and rejects sync 429s; only its load generator
+handles the existing recycle response. The public client does not retry renders.
 
 ## Design history and verification
 
