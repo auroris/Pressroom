@@ -85,14 +85,14 @@ display it. Background colours and images are printed by default; set
 ## Headers and footers
 
 Running headers and footers are separate HTML templates in the request, not part
-of the document. The defaults print the document `<title>` at the top and
-"Page N of M" at the bottom:
+of the document. The defaults leave the header blank and print "Page N / M"
+at the bottom right in 10px text with 20px of right padding:
 
 ```json
 "options": {
   "displayHeaderFooter": true,
-  "headerTemplate": "<div style=\"font-size:9px;width:100%;text-align:center\"><span class=\"title\"></span></div>",
-  "footerTemplate": "<div style=\"font-size:9px;width:100%;text-align:center\">Page <span class=\"pageNumber\"></span> of <span class=\"totalPages\"></span></div>"
+  "headerTemplate": "<div></div>",
+  "footerTemplate": "<div style=\"font-size: 10px; text-align: right; width: 100%; padding-right: 20px;\">Page <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span></div>"
 }
 ```
 
@@ -108,8 +108,10 @@ Chromium fills elements with the classes `date`, `title`, `url`, `pageNumber`, a
   Chromium build, even with an embedded `@font-face` rule. Use a generic family
   such as `sans-serif` and check the appearance on the Windows server.
 
-Set `options.displayHeaderFooter` to `false` for documents that draw their own
-running elements.
+Supply `options.headerTemplate` to enable a custom header. The default empty
+`<div></div>` suppresses Chromium's built-in header while leaving the footer
+enabled. Set `options.displayHeaderFooter` to `false` for documents that draw
+their own running elements.
 
 ## Accessibility and navigation
 

@@ -768,11 +768,14 @@
           },
           "headerTemplate": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "default": "<div></div>",
+            "description": "An empty template suppresses the default header while keeping the footer enabled. Supply HTML to render a custom header."
           },
           "footerTemplate": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "default": "<div style=\"font-size: 10px; text-align: right; width: 100%; padding-right: 20px;\">Page <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span></div>"
           },
           "media": {
             "type": "string",

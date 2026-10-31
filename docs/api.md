@@ -82,8 +82,8 @@ header may be omitted; a supplied invalid key is still rejected with 401. See
     "printBackground": true,
     "scale": 1.0,
     "displayHeaderFooter": true,
-    "headerTemplate": "<div style=\"font-size:9px;width:100%;text-align:center\"><span class=\"title\"></span></div>",
-    "footerTemplate": "<div style=\"font-size:9px;width:100%;text-align:center\">Page <span class=\"pageNumber\"></span> of <span class=\"totalPages\"></span></div>",
+    "headerTemplate": "<div></div>",
+    "footerTemplate": "<div style=\"font-size: 10px; text-align: right; width: 100%; padding-right: 20px;\">Page <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span></div>",
     "tagged": true,
     "outline": true,
     "media": "print",
@@ -113,7 +113,7 @@ case-sensitive, unknown properties are rejected, numbers must be JSON numbers, a
 | `options.printBackground` | boolean | `true` | Print background colours and images |
 | `options.scale` | number | `1` | 0.1 to 2 |
 | `options.displayHeaderFooter` | boolean | `true` | Render the header and footer templates |
-| `options.headerTemplate`, `options.footerTemplate` | string | title / page numbers | HTML with Chromium's `date`, `title`, `url`, `pageNumber`, `totalPages` classes. Own styles required; `<base>` rejected |
+| `options.headerTemplate`, `options.footerTemplate` | string | blank header / right-aligned `Page N / M` footer | HTML with Chromium's `date`, `title`, `url`, `pageNumber`, `totalPages` classes. Own styles required; `<base>` rejected |
 | `options.tagged` | boolean | `true` | Request structural tagging |
 | `options.outline` | boolean | `true` | Build a document outline from headings |
 | `options.media` | `"print"` or `"screen"` | `print` | CSS media emulated during rendering |

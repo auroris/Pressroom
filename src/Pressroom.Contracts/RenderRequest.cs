@@ -51,8 +51,9 @@ public sealed record RenderOptions
     public bool PrintBackground { get; init; } = true;
     public double Scale { get; init; } = 1;
     public bool DisplayHeaderFooter { get; init; } = true;
-    public string? HeaderTemplate { get; init; } = "<div style=\"font-size:9px;width:100%;text-align:center\"><span class=\"title\"></span></div>";
-    public string? FooterTemplate { get; init; } = "<div style=\"font-size:9px;width:100%;text-align:center\">Page <span class=\"pageNumber\"></span> of <span class=\"totalPages\"></span></div>";
+    // An explicit empty template suppresses Chromium's built-in header while keeping the footer enabled.
+    public string? HeaderTemplate { get; init; } = "<div></div>";
+    public string? FooterTemplate { get; init; } = "<div style=\"font-size: 10px; text-align: right; width: 100%; padding-right: 20px;\">Page <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span></div>";
     public bool Tagged { get; init; } = true;
     public bool Outline { get; init; } = true;
     public string Media { get; init; } = "print";

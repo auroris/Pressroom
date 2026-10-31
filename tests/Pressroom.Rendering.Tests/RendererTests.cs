@@ -169,8 +169,9 @@ public sealed class BrowserIntegrationTests(BrowserFixture fixture) : IClassFixt
         Assert.Equal(792, pdf.GetPage(1).Height, precision: 0);
         var text = string.Join(" ", pdf.GetPages().Select(p => p.Text));
         Assert.Contains("Québec", text);
-        Assert.Contains("Page 1 of 2", text);
-        Assert.Contains("Page 2 of 2", text);
+        Assert.DoesNotContain("Ordres / Orders", text);
+        Assert.Contains("Page 1 / 2", text);
+        Assert.Contains("Page 2 / 2", text);
         Assert.Contains(pdf.GetPage(1).Letters, letter => letter.FontName?.Contains("NotoSans", StringComparison.Ordinal) == true);
         var syntax = Encoding.Latin1.GetString(result.Pdf);
         Assert.Contains("/StructTreeRoot", syntax);

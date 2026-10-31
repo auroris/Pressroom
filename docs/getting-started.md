@@ -127,7 +127,7 @@ Invoke-WebRequest -Method Post -Uri http://localhost:5177/v1/render `
 The response is `application/pdf` with a `Content-Disposition` header carrying the
 sanitized file name, plus `X-Render-Pages` and `X-Render-Duration-Ms`. Open
 `orders.pdf` and you should see the two-page bilingual document with
-"Page 1 of 2" footers.
+"Page 1 / 2" and "Page 2 / 2" footers at the bottom right and no running header.
 
 A minimal request is just the HTML:
 
