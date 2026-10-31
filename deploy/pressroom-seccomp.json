@@ -1163,11 +1163,12 @@
         "clone3",
         "unshare",
         "setns",
+        "chroot",
         "pidfd_open",
         "pidfd_send_signal"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "Chromium user namespace sandbox and Pressroom owned-process cleanup."
+      "comment": "Chromium user namespace sandbox (including chroot after cap-drop ALL) and Pressroom owned-process cleanup."
     }
   ]
 }

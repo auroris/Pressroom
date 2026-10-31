@@ -9,12 +9,11 @@ services:
       - seccomp=./pressroom-seccomp.json
     cap_drop: [ALL]
     shm_size: 1gb
-    tmpfs: [/tmp]
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=256m
+      - /var/lib/pressroom:rw,nosuid,noexec,size=512m,uid=10001,gid=10001,mode=0700
     stop_grace_period: 45s
     mem_limit: 1536m
     cpus: 1
     volumes:
       - ./pressroom.settings.json:/etc/pressroom/pressroom.settings.json:ro
-      - pressroom-state:/var/lib/pressroom
-volumes:
-  pressroom-state:

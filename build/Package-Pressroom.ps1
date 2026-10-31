@@ -54,6 +54,15 @@ $headless = @(Get-ChildItem -LiteralPath (Join-Path $publishRoot 'browsers') -Re
 if ($headless.Count -ne 1) {
     throw 'The publish payload must contain exactly one Chromium headless shell.'
 }
+if (!$windowsPayload) {
+    if (![OperatingSystem]::IsLinux()) { throw 'Verify Linux executable permissions on Linux.' }
+    $requiredMode = [IO.UnixFileMode]::UserExecute -bor [IO.UnixFileMode]::GroupExecute -bor [IO.UnixFileMode]::OtherExecute
+    foreach ($executable in @((Join-Path $publishRoot 'Pressroom.Server'), (Join-Path $publishRoot '.playwright/node/linux-x64/node'), $headless[0].FullName)) {
+        if (([IO.File]::GetUnixFileMode($executable) -band $requiredMode) -ne $requiredMode) {
+            throw "The Linux executable must be runnable by the deployment identity: $executable"
+        }
+    }
+}
 
 $manifest = Get-Content -LiteralPath (Join-Path $publishRoot 'release-manifest.json') -Raw | ConvertFrom-Json
 $versionSuffix = if ($Version.Contains('+')) { '.' } else { '+' }

@@ -54,4 +54,10 @@
     </ItemGroup>
     <RemoveDir Directories="$(_PressroomCheckDirectory)" />
   </Target>
+  <Target Name="PressroomLinuxExecutableModes" AfterTargets="Publish"
+          Condition="'$(RuntimeIdentifier)' == 'linux-x64' and '$(OS)' != 'Windows_NT'">
+    <!-- NuGet's Node payload can have owner-only execute permission. A release is
+         installed by root and executed by a different identity, including in Docker. -->
+    <Exec Command="chmod 755 &quot;$(PublishDir).playwright/node/linux-x64/node&quot; &quot;$(PublishDir)Pressroom.Server&quot;" />
+  </Target>
 </Project>

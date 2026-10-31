@@ -118,7 +118,10 @@ outbound job delivery are implemented. Job logs remain metadata only.
 - **Operating-system egress isolation.** The controls above are browser and
   application controls, verified by tests. A deployment that needs a strict
   no-network guarantee must enforce it independently, for example with firewall
-  policy on the worker identity.
+  policy on the worker identity. The [Linux container deployment](container.md)
+  documents and tests optional iptables rules on Linux and HNS ACLs on Windows
+  for this purpose. Ordinary container startup does not install host firewall
+  rules; opt in to the isolated deployment recipe when outbound denial is required.
 - **Protection against a browser exploit.** The Chromium sandbox and a fresh
   context per render limit exposure; they are not a substitute for keeping the
   release current and the server isolated.

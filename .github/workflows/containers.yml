@@ -1,0 +1,206 @@
+name: Container images
+run-name: Container images ${{ inputs.version }} from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Application version without v (for example, 1.2.3)'
+        type: string
+        required: true
+      publish:
+        description: Publish verified images to GitHub Container Registry
+        type: boolean
+        default: true
+      update_latest:
+        description: Also update the latest tag
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-images
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  select:
+    name: Select the latest stable Playwright
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      playwright: ${{ steps.versions.outputs.playwright }}
+      image: ${{ steps.versions.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: versions
+        run: |
+          $number = '(0|[1-9][0-9]*)'
+          $identifier = '(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          if ($env:RELEASE_VERSION -cnotmatch "\A$number\.$number\.$number(?:-$identifier(?:\.$identifier)*)?\z") {
+            throw 'Use a version such as 1.2.3 or 1.2.3-rc.1, without a v prefix or build metadata.'
+          }
+          foreach ($part in $env:RELEASE_VERSION.Split('-')[0].Split('.')) {
+            if ([long]$part -gt 65534) { throw 'Version components must be at most 65534.' }
+          }
+          $playwright = ./build/Resolve-PlaywrightVersion.ps1
+          "playwright=$playwright" >> $env:GITHUB_OUTPUT
+          "image=ghcr.io/$($env:GITHUB_REPOSITORY.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "Selected Playwright $playwright for this run; the matching driver and Chromium must pass verification." >> $env:GITHUB_STEP_SUMMARY
+
+  linux:
+    name: Verify and publish Linux x64
+    needs: select
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.select.outputs.image }}
+      PLAYWRIGHT_VERSION: ${{ needs.select.outputs.playwright }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare optional isolation on this disposable test host
+        shell: bash
+        run: |
+          docker network create --driver bridge --opt com.docker.network.bridge.name=pressroom0 --opt com.docker.network.bridge.enable_icc=false pressroom-egress-blocked
+          sudo iptables -I DOCKER-USER 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo iptables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo ip6tables -I FORWARD 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+          sudo ip6tables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
+      - name: Pull current bases, build, and test
+        run: ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "$($env:IMAGE):$($env:RELEASE_VERSION)-linux" -PlaywrightVersion $env:PLAYWRIGHT_VERSION -TestNetworkIsolation
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE }}:${{ inputs.version }}-linux
+          format: spdx-json
+          output-file: artifacts/pressroom-linux.spdx.json
+          upload-release-assets: false
+      - name: Reject critical vulnerabilities
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ inputs.version }}-linux
+          severity: CRITICAL
+          exit-code: '1'
+          format: table
+      - name: Preserve verification and provenance
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-container-verification
+          path: |
+            artifacts/container-*.json
+            artifacts/container-publish/release-manifest.json
+            artifacts/container-smoke/**/result.json
+            artifacts/container-smoke/**/container.log
+            artifacts/container-smoke/**/bilingual.pdf
+            artifacts/pressroom-linux.spdx.json
+          retention-days: 14
+      - name: Publish verified Linux image
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_LATEST: ${{ inputs.update_latest }}
+        run: |
+          $env:GH_TOKEN | docker login ghcr.io -u $env:GITHUB_ACTOR --password-stdin
+          if ($LASTEXITCODE -ne 0) { throw 'Registry login failed.' }
+          try {
+            $image = "$($env:IMAGE):$($env:RELEASE_VERSION)-linux"
+            docker push $image
+            if ($LASTEXITCODE -ne 0) { throw 'Image push failed.' }
+            # Preserve the existing Linux version/latest tags for Compose users.
+            $tags = @("$($env:IMAGE):$env:RELEASE_VERSION")
+            if ($env:UPDATE_LATEST -eq 'true' -and !$env:RELEASE_VERSION.Contains('-')) {
+              $tags += @("$($env:IMAGE):latest", "$($env:IMAGE):latest-linux")
+            }
+            foreach ($tag in $tags) {
+              docker tag $image $tag
+              if ($LASTEXITCODE -ne 0) { throw "Could not tag $tag." }
+              docker push $tag
+              if ($LASTEXITCODE -ne 0) { throw "Could not push $tag." }
+            }
+            $digest = docker image inspect $image --format '{{index .RepoDigests 0}}'
+            "Published $digest. Verified Playwright: $env:PLAYWRIGHT_VERSION." >> $env:GITHUB_STEP_SUMMARY
+          } finally { docker logout ghcr.io }
+
+  windows:
+    name: Verify and publish Windows LTSC 2022
+    needs: select
+    runs-on: windows-2022
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.select.outputs.image }}
+      PLAYWRIGHT_VERSION: ${{ needs.select.outputs.playwright }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Pull current compatible bases, build, and test
+        # Explicitly tests the optional HNS policy on this disposable admin runner.
+        run: ./build/Build-WindowsContainer.ps1 -Version $env:RELEASE_VERSION -Image "$($env:IMAGE):$($env:RELEASE_VERSION)-windows-ltsc2022" -PlaywrightVersion $env:PLAYWRIGHT_VERSION -TestNetworkIsolation
+      - name: Audit managed dependencies
+        run: |
+          $report = dotnet list Pressroom.slnx package --vulnerable --include-transitive --format json --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency audit failed.' }
+          $report | Set-Content artifacts/windows-dependency-audit.json
+          $audit = $report -join "`n" | ConvertFrom-Json
+          $issues = @($audit.projects.frameworks.topLevelPackages.vulnerabilities) + @($audit.projects.frameworks.transitivePackages.vulnerabilities)
+          if (@($issues | Where-Object severity -eq 'Critical').Count -gt 0) { throw 'Critical managed dependency vulnerability detected.' }
+          'Windows audit covers NuGet dependencies; Windows OS/Chromium native binaries are not covered by that audit. Current serviced bases and matched Chromium were pulled and tested.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Preserve verification and provenance
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-container-verification
+          path: |
+            artifacts/windows-container-build.json
+            artifacts/windows-dependency-audit.json
+            artifacts/windows-container-publish/release-manifest.json
+            artifacts/windows-container-smoke/**/result.json
+            artifacts/windows-container-smoke/**/container.log
+            artifacts/windows-container-smoke/**/final-container.log
+            artifacts/windows-container-smoke/**/bilingual.pdf
+            artifacts/windows-container-smoke/**/exit.txt
+          retention-days: 14
+      - name: Publish verified Windows image
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_LATEST: ${{ inputs.update_latest }}
+        run: |
+          $env:GH_TOKEN | docker login ghcr.io -u $env:GITHUB_ACTOR --password-stdin
+          if ($LASTEXITCODE -ne 0) { throw 'Registry login failed.' }
+          try {
+            $image = "$($env:IMAGE):$($env:RELEASE_VERSION)-windows-ltsc2022"
+            docker push $image
+            if ($LASTEXITCODE -ne 0) { throw 'Windows image push failed.' }
+            if ($env:UPDATE_LATEST -eq 'true' -and !$env:RELEASE_VERSION.Contains('-')) {
+              $latest = "$($env:IMAGE):latest-windows-ltsc2022"
+              docker tag $image $latest
+              if ($LASTEXITCODE -ne 0) { throw 'Windows latest tagging failed.' }
+              docker push $latest
+              if ($LASTEXITCODE -ne 0) { throw 'Windows latest push failed.' }
+            }
+            $digest = docker image inspect $image --format '{{index .RepoDigests 0}}'
+            "Published $digest. Verified Playwright: $env:PLAYWRIGHT_VERSION." >> $env:GITHUB_STEP_SUMMARY
+          } finally { docker logout ghcr.io }

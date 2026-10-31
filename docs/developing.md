@@ -149,6 +149,12 @@ for the required repository access.
 
 ## Packages
 
+For container-only builds, use **Actions → Container images → Run workflow**.
+It has only a `workflow_dispatch` trigger, resolves the latest stable Playwright
+once, pulls current compatible Linux/Windows bases, and tests before optionally
+publishing to GHCR with GitHub's built-in token. No Docker Hub account is needed.
+See [containers](container.md) for tags, test-only runs and optional firewall rules.
+
 Contracts and Client target `net8.0;net10.0`. The server and renderer remain .NET 10
 and are not packable. The client tests run on both frameworks (install both runtimes).
 

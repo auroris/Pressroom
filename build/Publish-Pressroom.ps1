@@ -131,8 +131,11 @@ if ($Mode -eq 'Prepare') {
     Copy-Item -Path (Join-Path $PSScriptRoot '../docs/images/*') -Destination $releaseImages -Force
     $releaseDeploy = Join-Path $BundleDirectory 'deploy'
     [IO.Directory]::CreateDirectory($releaseDeploy) | Out-Null
-    foreach ($example in @('README.md', 'compose.yaml', 'kubernetes.yaml', 'pressroom-seccomp.json', 'check.settings.json', 'LICENSE.moby')) {
+    foreach ($example in @('README.md', 'compose.yaml', 'compose.host-isolated.yaml', 'kubernetes.yaml', 'pressroom-seccomp.json', 'check.settings.json', 'LICENSE.moby')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../deploy/' + $example)) -Destination $releaseDeploy -Force
+    }
+    foreach ($helper in @('Start-WindowsContainer.ps1','Install-WindowsContainerPolicy.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $helper) -Destination $releaseDeploy -Force
     }
     $inventory = @()
     foreach ($entry in $deps.libraries.PSObject.Properties | Sort-Object Name) {

@@ -8,6 +8,8 @@ sandbox enabled. Printing is Windows-only. Record target-host qualification in
 
 Use Ubuntu 24.04 LTS or Debian 13, x64, a kernel with pidfd support (5.4 or later),
 and an unprivileged service identity. Install the .NET 10 ASP.NET Core runtime.
+Ubuntu 26.04.1 was also exercised on a clean VM; the exact scope and measurements
+are recorded in [Linux acceptance](linux-acceptance.md).
 Chromium also needs shared libraries; the runtime alone and fonts are insufficient.
 On Ubuntu 24.04:
 
@@ -33,6 +35,23 @@ the installed Chromium executable to create user namespaces. Have the host
 administrator install an executable-specific AppArmor profile granting `userns`
 for the release's headless-shell path. Containers need the supplied seccomp
 profile too. Never disable Chromium's sandbox to work around host policy.
+
+For the versioned installation layout below, the Ubuntu VM used this
+`/etc/apparmor.d/pressroom-browser` profile:
+
+```text
+abi <abi/4.0>,
+include <tunables/global>
+profile pressroom-release /opt/pressroom/releases/**/chrome-headless-shell flags=(unconfined) {
+  userns,
+}
+```
+
+Load it with `sudo apparmor_parser -r /etc/apparmor.d/pressroom-browser`.
+The release tree must remain root-owned and unwritable by the service. This
+grants user namespaces to that executable path without disabling Ubuntu's
+global `kernel.apparmor_restrict_unprivileged_userns` setting. A build outside
+`/opt/pressroom/releases` needs a separate policy for its own browser path.
 
 Run `--check` as the service identity. A sandbox/library failure stops startup.
 `Render:ChromiumSandbox=false` is rejected by the server. CI relaxes Ubuntu's
