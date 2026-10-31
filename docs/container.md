@@ -1,5 +1,14 @@
 # Containers
 
+For internet-facing use, the recommended deployment is **Linux Docker with the
+iptables isolation below**, API-key authentication, and an HTTPS reverse proxy
+in front of the loopback-bound API. A [direct Linux installation](linux.md) under
+a dedicated unprivileged user is also suitable for internet-facing use.
+Windows/IIS and Windows containers are intended primarily for intranets where
+Pressroom receives no internet traffic. Both Linux options also serve intranets.
+Firewall configuration is optional in general, but is part of the recommended
+internet-facing Docker setup.
+
 The Linux image runs on Microsoft's current .NET 10 ASP.NET Core Linux base as
 UID/GID 10001. Builds pull the rolling `10.0` tags each time; the verified base
 currently uses Ubuntu 24.04. The SDK stays in the builder. Chromium sandboxing and dependency
@@ -155,6 +164,9 @@ artifacts. Linux publication also requires the SBOM and critical-CVE gate.
 
 ## Windows containers
 
+Windows containers are intended primarily for intranet deployments. Use the
+Linux container with iptables isolation for the recommended internet-facing setup.
+
 The Windows image uses the latest serviced Windows Server LTSC 2022 base and
 the .NET 10 runtime. This matches the tested Windows Server 2022 host. Server Core
 failed the sandboxed browser check; the full Windows Server image passed. Windows
@@ -178,6 +190,8 @@ Put `pressroom.settings.json` in a dedicated external directory, with
 This publishes only TCP 8080, mounts configuration read-only, runs as
 ContainerUser, and uses `--rm` so stopping or crashing removes the complete
 writable layer. Start a new container with the helper after a stop or host reboot.
+Use stop followed by the start helper when discarding state: `docker restart`
+retains the same Windows writable layer, even with `--rm`.
 Windows Docker does not implement Linux capabilities or the Linux read-only/tmpfs
 options; it uses the unprivileged Windows identity and a disposable writable layer.
 

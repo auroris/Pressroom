@@ -1,5 +1,9 @@
 # Deployment on Windows and IIS
 
+Direct Windows/IIS deployments are intended primarily for intranets. For
+internet-facing traffic, prefer [Linux Docker with iptables isolation](container.md),
+or use [direct Linux](linux.md) under a dedicated unprivileged user.
+
 For Linux/systemd see [Linux](linux.md); for Docker, Compose or Kubernetes see
 [Containers](container.md). With jobs enabled, provision MaxStoredBytes plus one
 result commit, logs and temp space. Run one instance per state root and disable
