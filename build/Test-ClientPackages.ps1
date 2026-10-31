@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Render')][uri]$ServerUrl,
     [Parameter(Mandatory, ParameterSetName = 'Compile')][switch]$BuildOnly,
     [string]$Feed = 'artifacts/nuget',
-    [string]$Version = '0.1.0',
+    [string]$Version = '1.1.0',
     [string]$Net8Dotnet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'

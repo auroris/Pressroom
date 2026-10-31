@@ -2,7 +2,7 @@
 # -PlaywrightVersion: 'pinned' (default) restores the checked-in lock files unchanged. 'latest' or an
 # explicit different version refreshes the lock files in this checkout; do not commit that refresh
 # unless the pinned version is being upgraded deliberately.
-param([string]$Version = '0.1.0', [string]$PlaywrightVersion = 'pinned')
+param([string]$Version = '1.1.0', [string]$PlaywrightVersion = 'pinned')
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsWindows()) { throw 'Run on Windows x64 with the .NET 10 SDK.' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

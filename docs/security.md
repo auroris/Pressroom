@@ -33,12 +33,12 @@ context:
 | Navigation | Navigating the main document away from the submitted HTML closes the page |
 | Chromium sandbox | On (`Render:ChromiumSandbox: true`). A failed sandboxed launch is a startup error; `--no-sandbox` is not a supported workaround |
 
-Two known behaviours of the pinned Chromium build surface as render errors rather
-than weaknesses: a header or footer template that attempts an external load can be
-rejected at print time or reach the request deadline, and a WebRTC attempt inside
-a `srcdoc` or blank child frame can crash that render under the connection policy.
-These failures produce content-free errors, the context is closed, and later
-renders remain usable.
+Two behaviours of the bundled Chromium build show up as failed renders rather than
+as weaknesses. A header or footer template that tries to load an external resource
+can be rejected at print time or run until the request deadline, and a WebRTC
+attempt inside a `srcdoc` or blank child frame can crash that render under the
+connection policy. In both cases the caller gets an error with no document content
+in it, the browser context is closed, and later renders are unaffected.
 
 ## Authentication
 
@@ -122,8 +122,8 @@ No callbacks or outbound job delivery are implemented. Job logs remain metadata 
   and publish profiles.
 - Give each calling application its own key, and opt in `AllowJavaScript` only
   where scripts are needed.
-- Verify every release's `release-manifest.json` hashes and the ZIP checksum before
-  deployment.
+- Verify every release's `release-manifest.json` hashes and the archive checksum
+  before deployment.
 
 ## What is not guaranteed
 
@@ -142,7 +142,7 @@ No callbacks or outbound job delivery are implemented. Job logs remain metadata 
 - **PDF/UA conformance.** Tagged output is requested by default, but conformance
   depends on the source HTML.
 
-The [verification record](development/verification.md) documents the sandbox and
-authentication checks that were run against real Chromium and IIS, and the
-[acceptance record](windows-acceptance.md) lists the checks a deployment should
-repeat on the target server.
+The controls above are exercised by automated tests against real Chromium on every
+release build. The [Windows / IIS acceptance checklist](windows-acceptance.md) and
+the Linux [acceptance checklist](linux.md#acceptance-checklist) list the checks a
+deployment should repeat on the target server.

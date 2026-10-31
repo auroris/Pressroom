@@ -27,7 +27,7 @@ blocked resources per render but never the URLs, so if an image fails to appear,
 check that it is embedded as a `data:` URL rather than referenced by address.
 
 Inline SVG works well for logos, marks, and charts, and keeps documents small. The
-bundled [sample document](../samples/orders-bilingual.html) uses an inline SVG mark.
+bundled [sample document](../../samples/orders-bilingual.html) uses an inline SVG mark.
 
 ## Fonts
 
@@ -135,7 +135,7 @@ recognises; the time zone must be an IANA identifier.
 ## JavaScript and readiness
 
 Scripts are disabled unless the calling application's API key carries
-`AllowJavaScript: true` (see [Configuration](configuration.md#javascript-permission)).
+`AllowJavaScript: true` (see [Configuration](../configuration.md#javascript-permission)).
 When the key permits scripts, the document may run inline and `data:`-backed
 scripts, which is how chart libraries and client-side templating can be used. The
 request can opt out for an individual render with `"options": { "javaScript": false }`
@@ -167,11 +167,11 @@ All readiness waiting happens within the request's overall deadline.
 
 ## The sample document
 
-[`samples/orders-bilingual.html`](../samples/orders-bilingual.html) is a compact
+[`samples/orders-bilingual.html`](../../samples/orders-bilingual.html) is a compact
 template for the techniques above: Noto Sans in all four styles, a `@page` rule,
 inline SVG, a table with `break-inside: avoid` rows, a `break-before: page`
 section, print and screen media rules, and English and French text. Its companion
-[`orders-bilingual.request.json`](../samples/orders-bilingual.request.json) is
+[`orders-bilingual.request.json`](../../samples/orders-bilingual.request.json) is
 ready to submit and requests inline display.
 
 ## Troubleshooting

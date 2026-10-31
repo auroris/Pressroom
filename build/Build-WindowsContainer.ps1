@@ -1,6 +1,6 @@
 #requires -Version 7.0
 # -PlaywrightVersion defaults to the repository's pinned version; pass 'latest' (or a version) explicitly to float.
-param([string]$Version='0.1.0',[string]$Image='pressroom:windows-local',[string]$PlaywrightVersion='pinned',[switch]$UseExistingPublish,[switch]$TestNetworkIsolation)
+param([string]$Version='1.1.0',[string]$Image='pressroom:windows-local',[string]$PlaywrightVersion='pinned',[switch]$UseExistingPublish,[switch]$TestNetworkIsolation)
 $ErrorActionPreference='Stop'
 if (![OperatingSystem]::IsWindows()) { throw 'Run on a Windows Docker host.' }
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

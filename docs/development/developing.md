@@ -1,32 +1,47 @@
 # Developing
 
 This guide is for people building Pressroom itself: the repository layout, the
-build and test commands, how a release is produced, and where the design history
-lives. Integrators do not need any of this; start with
-[Getting started](getting-started.md) instead.
+build and test commands, how the packages and container images are produced, and
+where the design history lives. Administrators installing or operating Pressroom
+do not need any of this; the guides in [`docs/`](../getting-started.md) are
+written for them and ship inside every release.
 
 ## Prerequisites
 
 - The .NET 10 SDK (`global.json` pins 10.0.100 with latest-feature roll-forward).
+- The .NET 8 runtime, for the second client test target. Without it, `dotnet test`
+  reports the net8.0 contracts project as a launch failure; pass `-f net10.0` to
+  run the rest.
 - A Visual Studio release that supports .NET 10, for the publish profiles.
-- The .NET 8 runtime for the second client test target.
 - Windows x64 for IIS publishing, or Linux x64 with PowerShell 7 and the
-  [documented libraries](linux.md) for Linux publishing. Real-browser tests need
+  [documented libraries](../linux.md) for Linux publishing. Real-browser tests need
   the browser payload and sandbox support.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `src/Pressroom.Server` | ASP.NET Core minimal API host: endpoints, authentication, admission, printing, publish targets, IIS `web.config` |
+| `src/Pressroom.Server` | ASP.NET Core minimal API host: endpoints, authentication, admission, jobs, printing, publish targets, IIS `web.config` |
 | `src/Pressroom.Rendering` | Browser supervisor, document validation, sandbox policy, font catalog, packaged Noto Sans fonts |
 | `src/Pressroom.Contracts` | Request and option records, `IPdfRenderer`, `RequestValidator`, JSON defaults. No browser dependency |
 | `src/Pressroom.Client` | `PressroomClient`, the HTTP implementation of `IPdfRenderer` |
-| `tests/` | Contract and client tests, renderer and sandbox tests, server configuration, printing, and HTTP tests |
-| `build/` | `Publish-Pressroom.ps1` and `Package-Pressroom.ps1`, invoked by MSBuild and the release workflow |
+| `tests/` | Contract and client tests, renderer and sandbox tests, server configuration, jobs, printing, and HTTP tests |
+| `build/` | PowerShell helpers invoked by MSBuild, the workflows, and container builds |
+| `deploy/` | Compose, Kubernetes, seccomp profile, and Windows container helpers, shipped with each release |
 | `samples/` | The bilingual sample document, its ready-to-send request, and the example settings file |
-| `docs/` | The user and integrator guides; `docs/development/` holds the design baseline and verification record |
-| `.github/workflows/release.yml` | The manual release workflow |
+| `docs/` | Administrator guides, shipped with each release |
+| `docs/development/` | Everything else: this guide, the API reference, the authoring and client guides, design history, and verification records |
+| `.github/workflows/` | The manual `Packages` and `Container images` workflows |
+
+## Documentation rules
+
+`docs/*.md` is for system administrators installing or operating Pressroom in the
+four supported configurations: Windows/IIS, Linux, and the Linux and Windows
+containers. Those guides may link to each other but never into `docs/development`,
+because they ship in the release without this folder. Guides under
+`docs/development` may link to each other and up to the administrator guides.
+Application-developer material (the [API reference](api.md), the
+[authoring guide](documents.md), and the [.NET client guide](client.md)) lives here.
 
 ## Build and test
 
@@ -38,15 +53,19 @@ dotnet build Pressroom.slnx -c Release --no-restore
 dotnet test --solution Pressroom.slnx -c Release
 ```
 
-Unit and API tests use controlled renderer substitutes and run anywhere. The
-real-browser tests need the browser payload (publish once, see below) and writable
-temporary state. Ordinary **Build** and tests never download browsers.
+Unit and API tests use controlled renderer substitutes and run anywhere, including
+on a host that has Pressroom installed: the test host selects its own settings file
+and never opens the machine-wide one. The real-browser tests need the browser
+payload (publish once, see below) and writable temporary state; enable them with
+`PRESSROOM_RUN_BROWSER_TESTS=1`, `PRESSROOM_TEST_SANDBOX=true`, and
+`PRESSROOM_TEST_BROWSERS_PATH` pointing at a published `browsers` folder. Ordinary
+builds and tests never download browsers.
 
-## Windows firewall prompts during browser tests
+### Windows firewall prompts during browser tests
 
-Sandbox tests intentionally exercise local TCP/UDP/WebRTC sockets. Windows may
-prompt for a newly copied `chrome-headless-shell.exe` at each executable path.
-Choose Cancel/Block; Chromium needs no inbound network exception. Reuse the same
+Sandbox tests intentionally exercise local TCP, UDP, and WebRTC sockets. Windows
+may prompt for a newly copied `chrome-headless-shell.exe` at each executable path.
+Choose Cancel or Block; Chromium needs no inbound network exception. Reuse the same
 browser bundle path for repeated tests. To prevent a first-use prompt, run this
 optional helper in an administrator PowerShell before testing that browser copy:
 
@@ -58,6 +77,14 @@ It adds an inbound **block** rule for that exact executable on every profile.
 It does not grant access or disable the firewall, and is never run by publish or
 tests. A new browser path needs a separate rule. See Microsoft's
 [firewall rule behavior](https://learn.microsoft.com/windows/security/operating-system-security/network-security/windows-firewall/rules).
+
+### Longer jobs acceptance run
+
+Enable the browser tests as above and set `PRESSROOM_JOB_ACCEPTANCE_COUNT=500`.
+Set `PRESSROOM_JOB_METRICS_PATH` to save successful sync-request p95 latency and
+planned-recycle 503 counts. The test requires a p95 ratio of at most 2 and rejects
+sync 429s; only its load generator handles the planned-recycle response. The
+public client does not retry renders.
 
 ## Running locally
 
@@ -75,14 +102,15 @@ application and the publish helper; no environment variables are needed.
 
 For cross-platform implementation work, a development-only publish can skip the
 browser bundle with `-p:PressroomBundleBrowser=false`. That output lacks the
-Windows browser bundle and check and is not a complete release.
+browser bundle and check and is not a complete release.
 
 ## Publishing from Visual Studio
 
 Open `Pressroom.slnx`, select **Pressroom.Server → Publish**, choose **IisFolder**,
 and click **Publish**. The default output is `artifacts\publish\IisFolder`. The
 profile is `net10.0`, `win-x64`, framework-dependent, with single-file, trimming,
-and AOT disabled. **IisFolderSelfContained** also includes the .NET runtime.
+and AOT disabled. **IisFolderSelfContained** also includes the .NET runtime; it is
+not part of the published releases.
 
 Publish automatically:
 
@@ -91,8 +119,9 @@ Publish automatically:
    headless shell into the publish payload. No separate Node, npm, or PowerShell 7
    is needed; the helper uses Windows PowerShell 5.1.
 3. Adds the complete browser tree, installer-selected companion files, fonts,
-   managed package notices, and private driver to the publish file list, using the
-   Web SDK's [publish file list](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/visual-studio-publish-profiles?view=aspnetcore-10.0#include-files)
+   managed package notices, the administrator guides, the `deploy` folder, and the
+   private driver to the publish file list, using the Web SDK's
+   [publish file list](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/visual-studio-publish-profiles?view=aspnetcore-10.0#include-files)
    rather than post-deployment copying.
 4. Makes an isolated local copy and runs `Pressroom.Server.exe --check` against it,
    with the sandbox enabled and a real PDF warm-up, using temporary state and no
@@ -121,11 +150,73 @@ publish folder for rollback.
 
 The build-machine check proves the payload launches and renders on the publishing
 machine. It does not replace the target-server
-[acceptance record](windows-acceptance.md).
+[acceptance checklist](../windows-acceptance.md).
+
+## Building the Linux package
+
+Build as non-root on Linux x64 with the .NET 10 SDK, PowerShell 7, and the
+libraries listed in the [Linux guide](../linux.md):
+
+```sh
+pwsh ./build/Publish-Linux.ps1 -Version 1.1.0 -OutputDirectory ./artifacts/linux-publish
+pwsh ./build/Package-Pressroom.ps1 -PublishDirectory ./artifacts/linux-publish \
+  -OutputDirectory ./artifacts/linux-release -Version 1.1.0 \
+  -Variant framework-dependent -RuntimeIdentifier linux-x64
+```
+
+The shared helper installs the pinned browser, stages the payload, performs a
+real sandboxed check, removes dependency-validation cache markers, and writes
+the manifest. It does not install machine libraries. The tarball preserves the
+executable modes that the Linux guide relies on.
+
+## Building and verifying container images
+
+On a prepared Linux Docker host with PowerShell 7:
+
+```sh
+pwsh ./build/Build-Container.ps1 -Version 1.1.0 -Image pressroom:local
+```
+
+Use a fresh `artifacts/container-publish` directory. The builder performs locked
+restore, tests, and a complete publish as UID 10001 with the seccomp profile. The
+runtime image is then built from that verified payload. This two-step build is
+intentional: Docker build `RUN` steps cannot use the runtime's seccomp profile. The
+builder needs network access to acquire dependencies; the running service does not.
+
+The final image passes an offline sandboxed check with networking disabled and
+`build/Test-Container.ps1`: API readiness, authenticated bilingual output,
+invalid-key rejection, no printers, active-job SIGTERM, and loss of temporary
+state on restart. Add `-TestNetworkIsolation` to the build or test helper after
+preparing the iptables rules from the [container guide](../container.md) to test
+outbound blocking with a reachable host canary. The build helpers do not install
+Linux firewall rules; CI prepares its disposable host and runs that extra check.
+
+On a Windows Docker host with PowerShell 7 and the .NET 10 SDK:
+
+```powershell
+./build/Build-WindowsContainer.ps1 -Version 1.1.0 -Image pressroom:windows-local
+```
+
+This publishes the Windows payload, builds `Dockerfile.windows` on the full
+`windows/server:ltsc2022` base (Server Core does not pass the sandboxed browser
+check), and runs `build/Test-WindowsContainer.ps1`. `-TestNetworkIsolation`
+installs and checks the optional HNS policy and needs an administrator session.
+
+### Playwright version selection
+
+Every build helper takes `-PlaywrightVersion`. The default, `pinned`, is the
+repository's `PressroomPlaywrightVersion` property with the checked-in lock files,
+restored in locked mode without a refresh, so the payload can be reproduced from
+the commit. `latest` is an explicit opt-in that resolves the newest stable release
+from NuGet, and an explicit `<version>` selects or reproduces a recorded one.
+Either of those refreshes the transitive lock files; on Windows that rewrites the
+lock files in the checkout, so do not commit the result unless you are
+deliberately upgrading the pin. The Dockerfile's apt package list follows the
+pinned Playwright's Chromium dependency list; review it when changing the pin.
 
 ## Manual package builds and GitHub releases
 
-The [Packages workflow](../.github/workflows/release.yml) has only a
+The [Packages workflow](../../.github/workflows/release.yml) has only a
 `workflow_dispatch` trigger. Open **Actions → Packages → Run workflow**, select
 the branch and enter a version without `v`, such as `1.2.3` or `1.2.3-rc.1`.
 Three jobs run in parallel after input validation:
@@ -138,15 +229,13 @@ Three jobs run in parallel after input validation:
 
 The Windows and Linux packages differ: they contain native apphosts, private
 Node/Playwright drivers and Chromium for their respective platforms. Both include
-fonts, documentation and a file-hash manifest, and require the .NET 10 ASP.NET Core
-runtime. IIS also needs the Hosting Bundle. Linux needs the documented native
-libraries and sandbox policy, and runs as an unprivileged user. Docker is used to
-build and verify the Linux payload, but is not required for its local installation.
-Both installer builds use the repository's pinned Playwright version
-(`PressroomPlaywrightVersion` with the checked-in lock files, restored in locked
-mode without a refresh), so one release carries one Chromium build and can be
-rebuilt from its commit. The workflow fails if either package manifest records a
-different version.
+fonts, the administrator guides, the `deploy` folder, and a file-hash manifest, and
+require the .NET 10 ASP.NET Core runtime. IIS also needs the Hosting Bundle. Linux
+needs the documented native libraries and sandbox policy, and runs as an
+unprivileged user. Docker is used to build and verify the Linux payload, but is not
+required for its local installation. Both installer builds use the pinned Playwright
+version, so one release carries one Chromium build and can be rebuilt from its
+commit; the workflow fails if either package manifest records a different version.
 
 The workflow tests both client target frameworks and compiles fresh consumers
 against the actual packages. Installer jobs require the sandboxed browser checks;
@@ -162,15 +251,20 @@ has repository write permission. It verifies all package checksums and creates
 Use an unused version when creating a release. If an interrupted upload leaves a
 tag or draft, inspect it before retrying. A package-only run can reuse a version.
 
-## Packages
+Bump `Version` in `Directory.Build.props` and the `-Version` defaults of the build
+helpers when starting a new release line, so local builds and workflow runs agree.
+
+## Container images
 
 For container-only builds, use **Actions → Container images → Run workflow**.
 It has only a `workflow_dispatch` trigger, deliberately resolves the latest stable
-Playwright once, pulls current compatible Linux/Windows bases, and tests before optionally
-publishing to GHCR with GitHub's built-in token. No Docker Hub account is needed.
-Run locally, the container build helpers default to the pinned version;
-`-PlaywrightVersion latest` is an explicit opt-in.
-See [containers](container.md) for tags, test-only runs and optional firewall rules.
+Playwright once, pulls current compatible Linux and Windows bases, and tests before
+optionally publishing to GHCR with GitHub's built-in token. No Docker Hub account is
+needed, and a newly created GHCR package may need its visibility set to public for
+anonymous pulls. Uncheck `publish` for verification only. Tags are listed in the
+[container guide](../container.md).
+
+## NuGet packages
 
 Contracts and Client target `net8.0;net10.0`. The server and renderer remain .NET 10
 and are not packable. The client tests run on both frameworks (install both runtimes).
@@ -202,23 +296,22 @@ web API consumers for both targets, installs packages from `artifacts/nuget`,
 compiles the client example and renders against an anonymous loopback test server.
 Use `-Net8Dotnet` if the .NET 8 runtime is installed separately. Each run uses a
 private package cache so an older local package with the same version cannot mask
-a change.
-Use `-BuildOnly` instead of `-ServerUrl` to verify package restore and consumer
-compilation without a running server, as the packaging workflow does.
-
-For the longer jobs acceptance run, enable the browser tests as above and set
-`PRESSROOM_JOB_ACCEPTANCE_COUNT=500`. Set `PRESSROOM_JOB_METRICS_PATH` to save
-successful sync-request p95 latency and planned-recycle 503 counts. The test
-requires a p95 ratio at most 2 and rejects sync 429s; only its load generator
-handles the existing recycle response. The public client does not retry renders.
+a change. Use `-BuildOnly` instead of `-ServerUrl` to verify package restore and
+consumer compilation without a running server, as the packaging workflow does.
 
 ## Design history and verification
 
-- [Rendering service design](development/rendering-service-design.md): the design
+- [API reference](api.md), [authoring documents](documents.md), and the
+  [.NET client](client.md): the integrator guides.
+- [Rendering service design](rendering-service-design.md): the design
   baseline, decisions, native dependency investigation, and references.
-- [Verification record](development/verification.md): what was tested against real
-  Chromium and IIS, and when.
-- [Windows / IIS acceptance](windows-acceptance.md): the checklist shipped with each
-  release for target-server qualification.
-- [Third-party notices](../THIRD-PARTY-NOTICES.md): licences of the redistributed
+- [Roadmap brief](roadmap-brief.md): the brief for the packages, Linux, container,
+  and jobs work, kept as history.
+- [Verification record](verification.md): what was tested against real
+  Chromium, IIS, Linux hosts, and containers, and when.
+- [Linux acceptance record](linux-acceptance.md): the Ubuntu VM qualification and
+  load measurements.
+- [Windows / IIS acceptance](../windows-acceptance.md): the checklist shipped with
+  each release for target-server qualification.
+- [Third-party notices](../../THIRD-PARTY-NOTICES.md): licences of the redistributed
   components.

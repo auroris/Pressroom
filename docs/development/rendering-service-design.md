@@ -1,6 +1,6 @@
 # Pressroom: HTML-to-PDF rendering service
 
-Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the Developing guide](../developing.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
+Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the Developing guide](developing.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
 
 Pressroom provides HTML-to-PDF rendering as a standalone service. Any application that can produce a self-contained HTML document can submit it and receive a PDF. Calling applications remain responsible for their templates and access checks.
 
@@ -151,7 +151,7 @@ Under IIS, enable Anonymous Authentication and disable Windows Authentication. A
 
 Run under a dedicated application-pool identity with access only to the required release and runtime locations. Set `ChromiumSandbox = true` explicitly and verify launch under that identity; Playwright's default is false. A launch failure must produce a clear startup error, not silently disable sandboxing. `--no-sandbox` is not a supported production workaround. [Launch options][pw-launch].
 
-Decision, 2026-10-24: retain Chromium's internal per-process sandbox and do not wrap its browser/broker in a custom Windows AppContainer. The prototype encountered both window-station access denial and denial of nested AppContainer-token creation. An outer AppContainer does not reproduce Chromium's complete set of per-process restrictions and mitigations. The discarded prototype is not part of the release. Whole-worker file and network restrictions remain separate deployment requirements; the current document controls do not establish an OS-level boundary. See [the investigation record](verification.md#windows-appcontainer-investigation--2026-10-24).
+Decision, 2026-10-24: retain Chromium's internal per-process sandbox and do not wrap its browser/broker in a custom Windows AppContainer. The prototype encountered both window-station access denial and denial of nested AppContainer-token creation. An outer AppContainer does not reproduce Chromium's complete set of per-process restrictions and mitigations. The discarded prototype is not part of the release. Whole-worker file and network restrictions remain separate deployment requirements; the current document controls do not establish an OS-level boundary.
 
 Use HTTPS to protect API keys and document content in transit.
 
@@ -262,7 +262,7 @@ The default framework-dependent profile targets `net10.0`, `win-x64`, with singl
 
 The publish helper copies supplied managed package notices, records versions and SHA-256 hashes, and removes only `DEPENDENCIES_VALIDATED` markers. It leaves `web.config` out of file hashes because the Web SDK transforms that file for the chosen profile after payload computation. Preserve `INSTALLATION_COMPLETE` and every installer-selected companion file.
 
-The production startup path never calls the installer. A successful publishing-machine check does not replace clean Windows/IIS qualification with the actual pool identity. See [the Developing guide](../developing.md) for the current workflow and [the acceptance record](../windows-acceptance.md) for the release gate.
+The production startup path never calls the installer. A successful publishing-machine check does not replace clean Windows/IIS qualification with the actual pool identity. See [the Developing guide](developing.md) for the current workflow and [the acceptance record](../windows-acceptance.md) for the release gate.
 
 ### 8.3 Paths and startup
 

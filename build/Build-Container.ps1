@@ -1,7 +1,7 @@
 #requires -Version 7.0
 # -PlaywrightVersion defaults to the repository's pinned version and its lock files, so the payload is
 # reproducible from the commit. Pass 'latest' (or a version) explicitly to float inside the builder.
-param([string]$Version = '0.1.0', [string]$Image = 'pressroom:local', [string]$PlaywrightVersion = 'pinned', [switch]$TestNetworkIsolation)
+param([string]$Version = '1.1.0', [string]$Image = 'pressroom:local', [string]$PlaywrightVersion = 'pinned', [switch]$TestNetworkIsolation)
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsLinux()) { throw 'Run on a Linux Docker host; Linux permissions are part of the check.' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

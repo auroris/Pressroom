@@ -1,22 +1,18 @@
 # Deployment examples
 
-For internet-facing use, choose Linux Docker with the documented iptables isolation,
-API-key authentication, and an HTTPS reverse proxy. Direct Linux under a dedicated
-unprivileged user is also suitable. Windows/IIS and Windows containers are intended
-primarily for intranets where Pressroom is not exposed to internet traffic.
-Basic Compose remains available without host firewall changes;
-the internet-facing recommendation uses the isolated overlay below.
+This folder ships with each release. `compose.yaml` and `kubernetes.yaml` use a
+mounted JSON settings file and one service instance. Replace the version and
+create the settings file or Secret before starting. `check.settings.json` is
+anonymous and intended only for an offline `--check`; do not deploy it as a
+production configuration. `Start-WindowsContainer.ps1` and
+`Install-WindowsContainerPolicy.ps1` are the Windows container helpers.
 
-`compose.yaml` and `kubernetes.yaml` use a mounted JSON settings file and one
-service instance. Replace the version and create the settings file/Secret before
-starting. `check.settings.json` is anonymous and intended only for an offline
-`--check`; do not deploy it as a production configuration.
-
-Basic Compose does not change host firewall policy. For optional outbound blocking,
-apply the iptables instructions in [containers](../docs/container.md), then add
+Basic Compose does not change host firewall policy, which the internet-facing
+recommendation requires. For optional outbound blocking, apply the iptables
+instructions in [containers](../docs/container.md), then add
 `-f compose.host-isolated.yaml`. Only the API port is published. State is temporary;
-configuration is a read-only host mount. Windows uses `Start-WindowsContainer.ps1`;
-its `-BlockOutbound` option explicitly enables administrator-managed HNS rules.
+configuration is a read-only host mount. On Windows, the start helper's
+`-BlockOutbound` option explicitly enables administrator-managed HNS rules.
 The Kubernetes example uses temporary Pod storage and a default-deny egress
 NetworkPolicy, which requires a policy-capable CNI. These are optional deployment
 recipes, not requirements imposed by the image.

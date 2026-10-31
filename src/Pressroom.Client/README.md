@@ -35,5 +35,5 @@ With jobs enabled on the server, SubmitAsync/GetJobAsync/WaitAsync manage durabl
 jobs, DownloadAsync/DownloadStreamAsync collect results, and CancelAsync removes
 them. RenderManyAsync bounds batch submission and yields PDFs or typed failures.
 
-See the [client guide](https://github.com/auroris/Pressroom/blob/main/docs/client.md)
+See the [client guide](https://github.com/auroris/Pressroom/blob/main/docs/development/client.md)
 for configuration, validation, streaming, and printing.

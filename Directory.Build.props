@@ -6,7 +6,7 @@
     <LangVersion>14.0</LangVersion>
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <Version>0.1.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Pressroom</Authors>
     <IsPackable>false</IsPackable>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>

@@ -113,7 +113,7 @@ PrintJobResult job = await pressroom.PrintAsync(new RenderRequest
 // job.JobId, job.Printer, job.Status == "submitted", job.PageCount
 ```
 
-The client never retries a print job. See [Printing](printing.md) for what
+The client never retries a print job. See [Printing](../printing.md) for what
 `submitted` does and does not mean.
 
 ## Batch rendering
@@ -133,13 +133,15 @@ if (completed.Status == JobStatus.Succeeded && completed.Printer is null)
 }
 ```
 
-`WaitAsync` polls using Retry-After (fallback one second, bounded at ten seconds),
-returns any terminal job, and throws TimeoutException on maxWait. Cancellation or
-maxWait stops polling, not the server job. GetJobAsync reads state;
-ListJobsAsync reconciles the caller's jobs using status, limit and after.
-DownloadStreamAsync owns its HTTP response like RenderStreamAsync; dispose it.
+`WaitAsync` polls at the interval the server suggests in `Retry-After` (one second
+if absent, never more than ten), returns as soon as the job reaches any terminal
+state, and throws `TimeoutException` when `maxWait` runs out. Cancelling the wait
+stops the polling, not the job on the server. `GetJobAsync` reads a job's current
+state, and `ListJobsAsync` pages through the caller's jobs by status so an
+application can reconcile after a crash. `DownloadStreamAsync` owns its HTTP
+response in the same way as `RenderStreamAsync`; dispose it when done.
 
-For PDF batches, bounded submission/polling/download/deletion is built in:
+For PDF batches, bounded submission, polling, download, and deletion are built in:
 
 ```csharp
 await foreach (RenderManyResult item in pressroom.RenderManyAsync(requests, 8, cancellationToken))
@@ -153,12 +155,13 @@ await foreach (RenderManyResult item in pressroom.RenderManyAsync(requests, 8, c
 }
 ```
 
-Results arrive in completion order and retain the original request. Exactly one
-of Pdf/Error is populated. The client never retries a failed submission or render.
-HTTP transport failures are surfaced as a `transport` error with unknown
-retryability; reconcile jobs before resubmitting. Early enumeration disposal or
-cancellation stops local work, leaving acknowledged jobs available on the server.
-Use SubmitAsync/WaitAsync for printer jobs, whose result is a receipt, not a PDF.
+Results arrive in completion order and carry the original request. Exactly one
+of `Pdf` and `Error` is populated. The client never retries a failed submission or
+render. An HTTP transport failure is reported as a `transport` error whose
+retryability is unknown, because the server may have accepted the job; list your
+jobs before resubmitting. Disposing the enumeration early, or cancelling, stops the
+local work and leaves any acknowledged jobs on the server. Use `SubmitAsync` and
+`WaitAsync` for printer jobs, whose result is a receipt rather than a PDF.
 
 ## Errors, retries, and fallback
 
@@ -196,7 +199,7 @@ signal.
 ## Local development
 
 Pressroom runs happily on `localhost`. Point `Pressroom:Url` at a local console run
-(see [Getting started](getting-started.md#4-run-it)) and keep a separate key or
+(see [Getting started](../getting-started.md#4-run-it)) and keep a separate key or
 anonymous mode for development.
 
 Applications that must render without any server can reference

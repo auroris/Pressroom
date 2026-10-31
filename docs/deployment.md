@@ -1,14 +1,12 @@
 # Deployment on Windows and IIS
 
 Direct Windows/IIS deployments are intended primarily for intranets. For
-internet-facing traffic, prefer [Linux Docker with iptables isolation](container.md),
-or use [direct Linux](linux.md) under a dedicated unprivileged user.
-
-For Linux/systemd see [Linux](linux.md); for Docker, Compose or Kubernetes see
-[Containers](container.md). With jobs enabled, provision MaxStoredBytes plus one
-result commit, logs and temp space. Run one instance per state root and disable
-IIS overlapped recycling for the local job store: stop the old worker before its
-replacement starts, or the store lock rejects the second instance.
+internet-facing traffic, prefer the [Linux container](container.md) with its
+documented isolation, or [direct Linux](linux.md) under a dedicated unprivileged
+user. With jobs enabled, provision `Jobs:MaxStoredBytes` plus one result commit,
+logs and temp space. Run one instance per state root and disable IIS overlapped
+recycling for the local job store: stop the old worker before its replacement
+starts, or the store lock rejects the second instance.
 
 A Pressroom release is one folder. Deploying it means provisioning IIS once, then
 copying the folder into place for every update. The application never downloads
@@ -31,7 +29,8 @@ browsers, restores packages, or installs Windows features at run time.
 ## What is in a release
 
 Each GitHub release contains `Pressroom-<version>-win-x64-framework-dependent.zip`
-and a `.zip.sha256` checksum. The ZIP holds:
+and a `.zip.sha256` checksum, alongside the Linux tarball and the .NET client
+packages for application teams. The ZIP holds:
 
 | Content | Purpose |
 |---|---|
@@ -42,11 +41,10 @@ and a `.zip.sha256` checksum. The ZIP holds:
 | `appsettings.json` | Nonsecret defaults |
 | `notices/`, `THIRD-PARTY-NOTICES.md` | Third-party licences |
 | `release-manifest.json` | Versions, font inventory, and SHA-256 hashes of every file |
-| `docs/windows-acceptance.md` | The acceptance checklist for this release |
+| `docs/` | These guides, including the acceptance checklist for this release |
 
-Verify the checksum, then extract the complete archive. A self-contained variant
-that also includes the .NET runtime can be produced from source with the
-`IisFolderSelfContained` publish profile; it still needs the Hosting Bundle.
+Verify the checksum, then extract the complete archive. Only the framework-dependent
+package is published; it needs the Hosting Bundle on the server.
 
 ## Directory layout and permissions
 
@@ -136,10 +134,6 @@ and no migration.
    complete folder before starting.
 5. Start the pool or remove the offline file. Check `/v1/health`, confirm the
    version in `/v1/info`, and run a smoke render.
-
-Visual Studio **Web Deploy** profiles work too: `EnableMsDeployAppOffline` lets the
-module stop the application before replacing locked files. See
-[Developing](developing.md#publishing-from-visual-studio).
 
 ## Rolling back
 

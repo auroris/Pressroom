@@ -124,7 +124,7 @@ if ($Mode -eq 'Prepare') {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../README.md') -Destination (Join-Path $BundleDirectory 'README.md') -Force
     $releaseDocs = Join-Path $BundleDirectory 'docs'
     [IO.Directory]::CreateDirectory($releaseDocs) | Out-Null
-    # Ship the user and integrator guides with the release; the design history stays in the repository.
+    # Ship only the administrator guides (docs/*.md) with the release; docs/development stays in the repository.
     Copy-Item -Path (Join-Path $PSScriptRoot '../docs/*.md') -Destination $releaseDocs -Force
     $releaseImages = Join-Path $releaseDocs 'images'
     [IO.Directory]::CreateDirectory($releaseImages) | Out-Null

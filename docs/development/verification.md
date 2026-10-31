@@ -1,12 +1,59 @@
 # Verification record
 
+Dated records of what was tested against real Chromium, IIS, Linux hosts and
+containers, and when. The [Linux acceptance record](linux-acceptance.md) holds the
+Ubuntu VM measurements. The administrator checklists that deployments repeat on
+their own servers are in [`docs/windows-acceptance.md`](../windows-acceptance.md)
+and the Linux guide.
+
+## Windows container VM verification — 2026-10-31
+
+The supplied Windows Server 2022 Standard VM (also a domain controller) ran Docker
+29.9.2 and the full `windows/server:ltsc2022` image with .NET 10.0.14 copied from
+Microsoft's serviced ASP.NET image. Server Core failed the sandboxed Chromium
+check; the full image passed. The image OS version was `10.0.20348.5773`.
+Playwright 1.64.1, private Node v24.22.1 and Chromium 156.0.8078.4 were matched;
+sandboxing and normal dependency validation remained enabled.
+
+The final image passed authenticated two-page bilingual PDF rendering, invalid-key
+401, empty printer discovery, ContainerUser identity, read-only external settings,
+active-job shutdown, and loss of job state after its `--rm` lifecycle. Startup
+including policy verification and container creation took 23.710 s; clean
+shutdown took 5.516 s with exit code zero. Optional HNS ACLs passed a reachable
+host TCP canary, internet and DNS denial, and blocked Windows service ports 135
+and 5985 while the API remained reachable. Basic startup does not install these
+rules; `-BlockOutbound` explicitly opts in.
+
+Image ID: `sha256:85cff65df926b59a819ee4f96fe08b8ac0e464ee3b5981b0ad08fc1eeb9caf10`.
+Windows base: `sha256:7a15615ebaa86fc085707866747b8806d457ab939a97c98c5af50e6c34b4a5d2`.
+ASP.NET base: `sha256:a0465a65a8e1841eb88f586d9fa2365a0f1b19280a6998d6bd085cb66aec6bed`.
+Evidence is in `artifacts/vm-acceptance` locally and `C:\PressroomTest\final\artifacts`
+on the VM. Subsequent container builds pull serviced bases and the latest stable
+Playwright and must pass again. Native Windows OS and Chromium vulnerabilities are
+not covered by the workflow's NuGet dependency audit.
+
+These checks do not qualify IIS or physical printing on that VM; the Windows / IIS
+checklist remains a separate deployment check. An in-container Windows firewall
+helper was investigated for the Windows image, but the Windows firewall services
+could not run inside the tested container, so the shipped option uses the host's
+HNS API instead.
+
+## Windows desktop printing check — 2026-10-30
+
+The local Windows test passed with SumatraPDF 3.6.1 and Microsoft Print to PDF.
+The user completed the save dialog, the API returned a two-page submission
+receipt, and the output was preserved under
+`artifacts/print-test/microsoft-print-to-pdf.pdf`. A nonexistent configured Windows
+printer returned 502, and an anonymous print request returned 401. This desktop
+test does not establish IIS identity or physical-printer acceptance.
+
 ## Packages, Linux, containers and jobs — 2026-10-31
 
 The four roadmap items are implemented in the working tree. **Nothing was
 published to nuget.org or a container registry.** The release workflow defaults
 `publish_nuget` to false. Subsequent VM tests qualified the Ubuntu 26.04 direct
 installation and Linux/Windows container scenarios described in
-[Linux acceptance](../linux-acceptance.md) and [Windows acceptance](../windows-acceptance.md).
+[Linux acceptance](linux-acceptance.md) and [Windows acceptance](../windows-acceptance.md).
 The separate `Container images` workflow is manual-only and uses GHCR.
 
 ### Windows build and automated checks

@@ -56,8 +56,8 @@ Chrome, no font installation, no downloads at run time.
 - **Opt-in batch jobs.** Submit, poll, download or cancel durable jobs. Per-key
   scheduling reserves capacity for interactive requests; local retention is bounded.
 - **Linux and containers.** Sandboxed Linux x64 packages, a non-root container,
-  and external JSON configuration. See [Linux acceptance](docs/linux-acceptance.md)
-  and optional network isolation in [containers](docs/container.md).
+  and external JSON configuration. See [Linux](docs/linux.md) and optional
+  network isolation in [containers](docs/container.md).
 
 ## Choose a deployment
 
@@ -112,28 +112,9 @@ curl -sS -X POST http://localhost:5177/v1/render \
   --data-binary @samples/orders-bilingual.request.json -o orders.pdf
 ```
 
-Or from .NET 8 or .NET 10. Download the GitHub workflow's `nuget-packages`
-artifact into a local feed first; see [client installation](docs/client.md#installing-the-package):
-
-```sh
-dotnet add package Pressroom.Client --version <version> --source ./packages
-```
-
-```csharp
-using Pressroom.Client;
-using Pressroom.Contracts;
-
-var http = new HttpClient { BaseAddress = new Uri("https://pressroom.example/") };
-http.DefaultRequestHeaders.Add("X-Api-Key", configuration["Pressroom:ApiKey"]!);
-var pressroom = new PressroomClient(http);
-
-var pdf = await pressroom.RenderAsync(new RenderRequest
-{
-    Html = completeHtml,
-    FileName = "orders.pdf",
-    Disposition = PdfDisposition.Inline
-}, cancellationToken);
-```
+Any HTTP client can call the API. The running service publishes its contract at
+`/openapi/v1.json`, and each release also attaches `Pressroom.Client`, an
+HTTP-only .NET package for .NET 8 and .NET 10.
 
 The [Getting started guide](docs/getting-started.md) walks through each step, and
 the [Deployment guide](docs/deployment.md) covers the production IIS setup.
@@ -142,19 +123,19 @@ the [Deployment guide](docs/deployment.md) covers the production IIS setup.
 
 | Guide | Read it for |
 |---|---|
-| [Getting started](docs/getting-started.md) | From release ZIP to first PDF: extract, configure a key, check, run, render with curl, PowerShell, or .NET. |
-| [Authoring documents](docs/documents.md) | Self-contained HTML, packaged fonts, page sizes and breaks, headers and footers, accessibility, JavaScript and readiness, troubleshooting. |
-| [API reference](docs/api.md) | Every endpoint, request option with its rules and defaults, response headers, status codes, deadlines, and capacity. |
-| [.NET client](docs/client.md) | `PressroomClient`: buffered and streaming renders, returning PDFs to browsers, printing, errors, retries, and fallback. |
+| [Getting started](docs/getting-started.md) | From release package to first PDF: extract, configure a key, check, run, and render with curl or PowerShell. |
 | [Configuration](docs/configuration.md) | The external settings file, access modes and API keys, JavaScript permission, limits, paths, logging, and upgrade notes. |
 | [Printing](docs/printing.md) | Windows/SumatraPDF and Linux/CUPS setup, the printer allowlist, receipts, and local testing. |
-| [Deployment](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
-| [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, tarball packaging and rollback. |
-| [Containers](docs/container.md) | Sandboxed non-root image, Compose, Kubernetes, volumes, health and image verification. |
-| [Linux acceptance](docs/linux-acceptance.md) | Ubuntu VM, container, load, recovery, and network-policy verification. |
+| [Deployment on Windows and IIS](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
+| [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, updates, rollback, and the acceptance checklist. |
+| [Containers](docs/container.md) | Image tags, the sandboxed non-root Linux image, Compose, Kubernetes, Windows containers, and optional network isolation. |
 | [Security model](docs/security.md) | Trust boundaries, document isolation controls, authentication, retention, resource protection, and what is not guaranteed. |
 | [Windows / IIS acceptance](docs/windows-acceptance.md) | The checklist shipped with each release for qualifying a target server. |
-| [Developing](docs/developing.md) | Repository layout, build and test, publishing from Visual Studio, the GitHub release workflow, and the design history. |
+
+These guides ship inside every release package. Material for application
+developers and for people working on Pressroom itself, including the API reference,
+the .NET client guide, the HTML authoring guide, build and release instructions, and
+the design history, lives in the repository's `docs/development` folder.
 
 ## Developing
 
@@ -165,10 +146,9 @@ dotnet test --solution Pressroom.slnx -c Release
 ```
 
 The prerequisites are the .NET 10 SDK and, for publishing, a Visual Studio release
-that supports .NET 10 on Windows x64. Publishing the `IisFolder` profile acquires
-the matching Chromium, runs the real renderer through a PDF warm-up, and writes the
-release manifest; ordinary builds and tests never download browsers. Releases are
-cut by a manual GitHub Actions workflow. See [Developing](docs/developing.md).
+that supports .NET 10 on Windows x64. Ordinary builds and tests never download
+browsers. Releases are cut by a manual GitHub Actions workflow; the developer guide
+in `docs/development` has the details.
 
 ## License
 

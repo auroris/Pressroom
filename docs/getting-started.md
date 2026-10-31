@@ -1,10 +1,10 @@
 # Getting started
 
-This guide takes you from a release ZIP to your first PDF in about ten minutes.
-It uses a local Windows console run for an intranet; the
-[Deployment guide](deployment.md) covers the production IIS setup. For internet-facing
-use, prefer [Linux Docker with iptables isolation](container.md), or run
-[direct Linux](linux.md) under a dedicated unprivileged user.
+This guide takes you from a release package to your first PDF in about ten
+minutes, using a local console run on Windows. The same steps apply on Linux with
+the paths from the [Linux guide](linux.md). For production hosting see
+[Deployment on Windows and IIS](deployment.md), [Linux](linux.md), or
+[Containers](container.md).
 
 ## 1. Download and extract a release
 
@@ -14,15 +14,15 @@ Verify the checksum, then extract the **entire** archive into an empty folder su
 `C:\Sites\Pressroom`:
 
 ```powershell
-(Get-FileHash .\Pressroom-1.0.1-win-x64-framework-dependent.zip -Algorithm SHA256).Hash
-Expand-Archive .\Pressroom-1.0.1-win-x64-framework-dependent.zip -DestinationPath C:\Sites\Pressroom
+(Get-FileHash .\Pressroom-<version>-win-x64-framework-dependent.zip -Algorithm SHA256).Hash
+Expand-Archive .\Pressroom-<version>-win-x64-framework-dependent.zip -DestinationPath C:\Sites\Pressroom
 ```
 
 The archive is the complete application: the server, its private Playwright driver
 and Node runtime under the hidden `.playwright` folder, the matching Chromium
-headless shell under `browsers`, the Noto Sans fonts, third-party notices, and a
-`release-manifest.json` listing every version and file hash. Nothing downloads at
-run time, so do not prune the folder.
+headless shell under `browsers`, the Noto Sans fonts, third-party notices, these
+guides, and a `release-manifest.json` listing every version and file hash. Nothing
+downloads at run time, so do not prune the folder.
 
 The only machine prerequisite is the **.NET 10 runtime**. For IIS, install the
 [.NET 10 Hosting Bundle](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0),
@@ -103,7 +103,7 @@ directory permissions, and the update and rollback procedure.
 
 ## 5. Render your first PDF
 
-The repository includes a ready-to-send request,
+The release includes a ready-to-send request,
 [`samples/orders-bilingual.request.json`](../samples/orders-bilingual.request.json),
 whose document exercises two Letter pages, English and French text, all four
 packaged font styles, inline vector graphics, and a page break.
@@ -141,40 +141,21 @@ A minimal request is just the HTML:
 }
 ```
 
-## 6. Call it from .NET
+## 6. Hand it to the application teams
 
-Reference the `Pressroom.Client` project (it pulls in `Pressroom.Contracts`), give it
-an `HttpClient` whose base address ends with a slash, and render:
-
-```csharp
-using Pressroom.Client;
-using Pressroom.Contracts;
-
-var http = new HttpClient { BaseAddress = new Uri("https://pressroom.example/") };
-http.DefaultRequestHeaders.Add("X-Api-Key", configuration["Pressroom:ApiKey"]!);
-var pressroom = new PressroomClient(http);
-
-var pdf = await pressroom.RenderAsync(new RenderRequest
-{
-    Html = completeHtml,
-    FileName = "orders.pdf",
-    Disposition = PdfDisposition.Inline
-}, cancellationToken);
-
-return File(pdf.Bytes, "application/pdf");
-```
-
-The client is HTTP-only and adds no browser dependency to your application. See the
-[.NET client guide](client.md) for streaming, printing, error handling, and
-fallback strategies.
+Each calling application needs the service URL and its own API key. The running
+service publishes its complete API contract at `/openapi/v1.json` (with a key in
+API-key mode), which is what application developers need to integrate; a .NET
+client package is attached to each GitHub release for teams that want one.
 
 ## Where next
 
 | You want to… | Read |
 |---|---|
-| Write HTML that paginates well and uses the packaged fonts | [Authoring documents](documents.md) |
-| See every request option, response header, and status code | [API reference](api.md) |
 | Configure keys, JavaScript permission, limits, and paths | [Configuration](configuration.md) |
 | Send output to a Windows or Linux printer | [Printing](printing.md) |
 | Put it on an IIS server and keep it updated | [Deployment](deployment.md) |
+| Run it on Linux under systemd | [Linux](linux.md) |
+| Run it as a Linux or Windows container | [Containers](container.md) |
 | Understand what the sandbox does and does not guarantee | [Security model](security.md) |
+| Qualify a Windows server before go-live | [Windows / IIS acceptance](windows-acceptance.md) |

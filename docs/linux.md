@@ -2,24 +2,22 @@
 
 Direct Linux is suitable for internet-facing or intranet use when Pressroom runs
 under a dedicated unprivileged user. Use API-key authentication and put an HTTPS
-reverse proxy in front of the loopback-bound service. [Linux Docker with iptables
-isolation](container.md) remains the preferred container option for internet-facing
-traffic. An unprivileged identity does not itself block outbound connections;
-host egress restrictions are a separate optional deployment setting.
+reverse proxy in front of the loopback-bound service. An unprivileged identity does
+not itself block outbound connections; host egress restrictions are a separate
+optional deployment setting, and the [Linux container](container.md) documents a
+tested recipe for them.
 
 Pressroom supports Linux x64 with the .NET 10 ASP.NET Core runtime and Chromium's
 sandbox enabled. Optional [printing](printing.md) uses CUPS `lp` or `lpr` and an
-explicit printer allowlist. Record target-host qualification in
-[Linux acceptance](linux-acceptance.md).
+explicit printer allowlist. Record target-host qualification with the
+[acceptance checklist](#acceptance-checklist) at the end of this guide.
 
 ## Prerequisites
 
 Use Ubuntu 24.04 LTS or Debian 13, x64, a kernel with pidfd support (5.4 or later),
-and an unprivileged service identity. Install the .NET 10 ASP.NET Core runtime.
-Ubuntu 26.04.1 was also exercised on a clean VM; the exact scope and measurements
-are recorded in [Linux acceptance](linux-acceptance.md).
-Chromium also needs shared libraries; the runtime alone and fonts are insufficient.
-On Ubuntu 24.04:
+and an unprivileged service identity. Ubuntu 26.04 has also been exercised. Install
+the .NET 10 ASP.NET Core runtime. Chromium also needs shared libraries; the runtime
+alone and fonts are insufficient. On Ubuntu 24.04:
 
 ```sh
 sudo apt-get install libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
@@ -29,23 +27,24 @@ sudo apt-get install libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
   fontconfig fonts-noto-core
 ```
 
-This list comes from [Playwright 1.64.1](https://github.com/microsoft/playwright/blob/v1.64.1/packages/playwright-core/src/server/registry/nativeDeps.ts).
-Debian 13 uses the same Chromium package names. Keep fontconfig and Noto:
-headers/footers use system fallback fonts; main documents use the packaged faces.
-The package never installs dependencies at startup or skips host validation.
+This is the Chromium dependency list published by the bundled Playwright release.
+Debian 13 uses the same package names. Keep fontconfig and Noto: headers and
+footers use system fallback fonts; main documents use the packaged faces. The
+package never installs dependencies at startup or skips host validation.
 
 ## Sandbox
 
 The headless shell uses unprivileged user namespaces; it has no SUID helper.
 Permit `user.max_user_namespaces` greater than zero and, where present,
 `kernel.unprivileged_userns_clone=1`. Ubuntu's AppArmor policy must also permit
-the installed Chromium executable to create user namespaces. Have the host
-administrator install an executable-specific AppArmor profile granting `userns`
-for the release's headless-shell path. Containers need the supplied seccomp
-profile too. Never disable Chromium's sandbox to work around host policy.
+the installed Chromium executable to create user namespaces. Install an
+executable-specific AppArmor profile granting `userns` for the release's
+headless-shell path. Containers need the supplied seccomp profile too. Never
+disable Chromium's sandbox to work around host policy.
 
-For the versioned installation layout below, the Ubuntu VM used this
-`/etc/apparmor.d/pressroom-browser` profile:
+For the versioned installation layout below, this `/etc/apparmor.d/pressroom-browser`
+profile grants user namespaces to that executable path without disabling Ubuntu's
+global `kernel.apparmor_restrict_unprivileged_userns` setting:
 
 ```text
 abi <abi/4.0>,
@@ -56,20 +55,19 @@ profile pressroom-release /opt/pressroom/releases/**/chrome-headless-shell flags
 ```
 
 Load it with `sudo apparmor_parser -r /etc/apparmor.d/pressroom-browser`.
-The release tree must remain root-owned and unwritable by the service. This
-grants user namespaces to that executable path without disabling Ubuntu's
-global `kernel.apparmor_restrict_unprivileged_userns` setting. A build outside
-`/opt/pressroom/releases` needs a separate policy for its own browser path.
+The release tree must remain root-owned and unwritable by the service. An
+installation outside `/opt/pressroom/releases` needs a profile for its own browser
+path.
 
-Run `--check` as the service identity. A sandbox/library failure stops startup.
-`Render:ChromiumSandbox=false` is rejected by the server. CI relaxes Ubuntu's
-AppArmor userns restriction only on its disposable runner and uses a non-root
-container; that is not a production host policy recipe.
+Run `--check` as the service identity. A sandbox or library failure stops startup,
+and `Render:ChromiumSandbox=false` is rejected by the server.
 
 ## Install and run
 
-Verify the `.tar.gz.sha256`, then extract the complete archive preserving modes
-into `/opt/pressroom/releases/<version>`. Keep the release read-only to the service.
+Download `Pressroom-<version>-linux-x64-framework-dependent.tar.gz` and its
+`.sha256` file from the [GitHub releases page](https://github.com/auroris/Pressroom/releases).
+Verify the checksum, then extract the complete archive preserving modes into
+`/opt/pressroom/releases/<version>`. Keep the release read-only to the service.
 
 ```sh
 sudo useradd --system --home /var/lib/pressroom --shell /usr/sbin/nologin pressroom
@@ -113,28 +111,45 @@ ReadWritePaths=/var/lib/pressroom
 WantedBy=multi-user.target
 ```
 
-Use an HTTPS reverse proxy with adequate body limits/timeouts. Avoid systemd
+Use an HTTPS reverse proxy with adequate body limits and timeouts. Avoid systemd
 restrictions that prohibit user namespaces. `KillMode=control-group` is the final
-boundary on unexpected server death. Normal/failed shutdown tracks descendants,
-sends SIGTERM then SIGKILL, and uses pidfds to avoid signalling reused PIDs.
+boundary on unexpected server death. Normal and failed shutdown track descendants,
+send SIGTERM then SIGKILL, and use pidfds to avoid signalling reused PIDs.
 
-## Updates, storage, and builds
+## Updates and storage
 
 Stop, extract into a new versioned directory, check, update `current`, and start.
 Roll back by stopping and restoring the previous complete release. Preserve
-settings and state. With jobs enabled, provision MaxStoredBytes plus one result
-commit, logs and temporary files. A store lock rejects a second instance using
-the same root. Drain/back up jobs before rollback to a version without jobs.
+settings and state. With jobs enabled, provision `Jobs:MaxStoredBytes` plus one
+result commit, logs, and temporary files. A store lock rejects a second instance
+using the same root. Drain or back up jobs before rolling back to a version
+without jobs.
 
-Build as non-root with the .NET 10 SDK, PowerShell 7, and libraries above:
+## Acceptance checklist
 
-```sh
-pwsh ./build/Publish-Linux.ps1 -Version 0.1.0 -OutputDirectory ./artifacts/linux-publish
-pwsh ./build/Package-Pressroom.ps1 -PublishDirectory ./artifacts/linux-publish \
-  -OutputDirectory ./artifacts/linux-release -Version 0.1.0 \
-  -Variant framework-dependent -RuntimeIdentifier linux-x64
-```
+Repeat these checks on each target host before go-live and after changing the
+release, the kernel, or the sandbox policy. Record passed, failed, or not run for
+each, with the release manifest and host inventory.
 
-The shared helper installs the pinned browser, stages the payload, performs a
-real sandboxed check, removes dependency-validation cache markers, and writes
-the manifest. It does not install machine libraries.
+- **Package and sandbox.** `--check` passes as the service identity with the
+  release read-only, the AppArmor profile loaded, and `Render:ChromiumSandbox`
+  true. `/v1/health` returns 200 after startup and `/v1/info` reports the expected
+  version, Chromium, and fonts.
+- **Access.** Valid key succeeds; missing, invalid, empty, and duplicate keys
+  return 401; anonymous mode, if used, renders without a key and rejects invalid
+  keys.
+- **Output.** `samples/orders-bilingual.request.json` renders two Letter pages
+  with page numbers, French accents, bold and italic faces, and the inline graphic.
+- **Limits and cancellation.** Oversized bodies return 413, saturation returns 429
+  with `Retry-After` while health stays 200, and cancelled or timed-out requests
+  release capacity.
+- **Shutdown and recovery.** `systemctl stop` finishes within `TimeoutStopSec`
+  with no live browser or driver processes left behind; the service becomes ready
+  again after restart and after a browser crash.
+- **Printing**, when configured: the CUPS helper submits as the service user, an
+  unknown identifier returns 400, anonymous print requests return 401, and
+  `temp/print-*` directories are removed after submission.
+- **Jobs**, when enabled: restart resumes queued jobs and marks the interrupted
+  one failed; another key cannot read or delete a job; expired results return 410.
+- **Egress**, if required: outbound connections from the service identity are
+  blocked by host policy, verified with a reachable control target.

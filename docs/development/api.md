@@ -1,51 +1,5 @@
 # API reference
 
-## Asynchronous jobs (opt-in)
-
-Set `Jobs:Enabled=true` to register these routes. Otherwise they return 404.
-Requests use the configured access mode; an owner is the submitting API key ID.
-Another key always receives 404, including on deletion. Anonymous callers share
-an owner and can list/read each other's jobs; use API-key mode for private work.
-
-| Endpoint | Response |
-|---|---|
-| `POST /v1/jobs` | Same body/validation as render; 202 job JSON with Location and Retry-After. Queue/quota pressure returns 429/Retry-After |
-| `GET /v1/jobs/{id}` | Job JSON; Retry-After while queued/rendering; 404 for unknown or another owner's ID |
-| `GET /v1/jobs/{id}/result` | PDF with Content-Disposition, X-Render-Pages, X-Render-Duration-Ms and no-store. 409/Retry-After before completion or during another download; 410 after cancellation/expiry |
-| `DELETE /v1/jobs/{id}` | 204; cancels queued/active work or deletes a result. Repeated deletion remains 204 while its metadata exists; unknown/other-owner IDs return 404 |
-| `GET /v1/jobs?status=&limit=&after=` | `{ items, nextAfter }`, caller-owned jobs newest first. Limit 1–100 (default 50), after is the last returned ID |
-
-IDs contain 128 random bits, represented as 32 lowercase hex characters. Submission
-accepts one Idempotency-Key of 1–128 visible ASCII characters. Same owner/key
-returns the existing job (including terminal/tombstone state) during retention;
-the first body wins. Use a new key for distinct work. Print jobs on both Windows
-and Linux require an API key and a configured printer identifier.
-
-A job has id, status (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`,
-`expired`), createdUtc, optional startedUtc/completedUtc, expiresUtc, fileName,
-disposition and links. Queued jobs expose queuePosition (global submission order,
-an estimate because scheduling rotates across owners). Succeeded jobs include
-pageCount/durationMs. Failed jobs have an error with type/title/status/detail,
-code and retryable. Printer jobs include printer/printJob; their result route
-returns 409 because no PDF is retained. Failed terminal jobs also return 409 on
-the result route; inspect the job error, not Retry-After, for retry policy.
-
-Queue time is separate from rendering timeout. Workers rotate owners in FIFO
-order and preserve reserved sync slots. Restart resumes queued jobs and marks
-active jobs failed with code interrupted. No automatic retries or callbacks occur.
-Print interruption can be ambiguous; check the spooler before retrying.
-
-Successful HTML is removed immediately. PDFs and failed HTML follow
-[configured retention](configuration.md). Expired metadata remains as a tombstone
-for one extra ResultRetention period (410 on result), then disappears (404).
-DeleteResultOnDownload expires after a successful complete response; only one
-download per job is admitted at a time. Client receipt cannot be proven after a
-network failure, so leave this option false when repeatable downloads are needed.
-
-`GET /v1/info` adds `jobs: { enabled, queued, rendering, stored, storedBytes,
-workers, maxQueued }`; health behavior is unchanged. storedBytes includes a
-metadata reserve. A full queue or storage budget is not itself unhealthy.
-
 Pressroom exposes a small HTTP API under `/v1`. All requests and responses are
 UTF-8; request bodies are uncompressed `application/json`. The live OpenAPI
 document at `/openapi/v1.json` describes the same contract.
@@ -59,10 +13,11 @@ document at `/openapi/v1.json` describes the same contract.
 | `GET /v1/info` | Configured access mode | Versions, limits, counters, page sizes, packaged fonts |
 | `GET /v1/printers` | API key required in every mode | Configured printer identifiers |
 | `GET /openapi/v1.json` | Configured access mode | OpenAPI contract |
+| `/v1/jobs` routes | Configured access mode; only when jobs are enabled | See [Asynchronous jobs](#asynchronous-jobs-opt-in) |
 
 In API-key mode, send the secret in the `X-Api-Key` header. In anonymous mode the
 header may be omitted; a supplied invalid key is still rejected with 401. See
-[Configuration](configuration.md#access-mode-and-api-keys).
+[Configuration](../configuration.md#access-mode-and-api-keys).
 
 ## POST /v1/render
 
@@ -105,7 +60,7 @@ case-sensitive, unknown properties are rejected, numbers must be JSON numbers, a
 | `html` | string | required | A complete HTML document. `<base>` elements are rejected |
 | `fileName` | string | `document.pdf` | Suggested download name. Sanitized: path separators and control characters replaced, reserved Windows names prefixed, truncated to 120 characters, `.pdf` appended |
 | `disposition` | `"inline"` or `"attachment"` | `attachment` | Selects the response `Content-Disposition`. Other values return 400 |
-| `printer` | string or null | `null` | A configured printer identifier; switches the response to a print receipt. See [Printing](printing.md) |
+| `printer` | string or null | `null` | A configured printer identifier; switches the response to a print receipt. See [Printing](../printing.md) |
 | `options.pageSize` | name or object | `Letter` (configurable) | `Letter`, `Legal`, `Tabloid`, `A3`, `A4`, `A5` (case-insensitive), or `{ "width": "8.5in", "height": "11in" }` |
 | `options.landscape` | boolean | `false` | Swaps the paper dimensions |
 | `options.margins` | object | 20 mm / 15 mm | Each of `top`, `right`, `bottom`, `left` is a length in `px`, `mm`, `cm`, or `in`, up to 200 inches. Margins must leave a positive printable area |
@@ -153,8 +108,8 @@ request returns **202 Accepted** with `application/json`:
 { "jobId": "64e5b7e07c8e4bdb86521bed5cd54d4c", "printer": "shipping", "status": "submitted", "pageCount": 1 }
 ```
 
-`submitted` means Windows accepted the job, not that it has printed. See
-[Printing](printing.md).
+`submitted` means the print helper accepted the job, not that it has printed. See
+[Printing](../printing.md).
 
 ### Status codes
 
@@ -185,7 +140,7 @@ document, readiness, PDF generation, and page counting. It does not restart betw
 stages and excludes sending the PDF to the client. Two renders run concurrently and
 eight more may wait by default; the eleventh concurrent request receives 429. The
 admission permit is held until the response has been sent, so slow clients count
-against capacity. The [Configuration guide](configuration.md#rendering-limits)
+against capacity. The [Configuration guide](../configuration.md#rendering-limits)
 explains the knobs.
 
 ## GET /v1/health
@@ -200,7 +155,7 @@ Application Initialization and load balancer probes.
 
 ```json
 {
-  "version": "1.0.1+3cc0787…",
+  "version": "1.1.0+d57eddc…",
   "playwrightVersion": "1.64.1",
   "chromiumVersion": "156.0.8078.4",
   "active": 0, "queued": 0, "admitted": 0, "admissionLimit": 10,
@@ -209,12 +164,14 @@ Application Initialization and load balancer probes.
   "rendersSinceStartup": 42,
   "lastBrowserRestartUtc": "2026-10-31T06:36:10Z",
   "pageSizes": ["Letter", "Legal", "Tabloid", "A3", "A4", "A5"],
-  "fonts": [{ "family": "Noto Sans", "weight": "400", "style": "normal" }, …]
+  "fonts": [{ "family": "Noto Sans", "weight": "400", "style": "normal" }, …],
+  "jobs": { "enabled": false, "queued": 0, "rendering": 0, "stored": 0, "storedBytes": 0, "workers": 1, "maxQueued": 200 }
 }
 ```
 
-`fonts` lists only the packaged faces guaranteed by the release. The response never
-includes keys, document content, or file system paths.
+`fonts` lists only the packaged faces guaranteed by the release. `storedBytes`
+includes a per-job metadata reserve; a full queue or storage budget is not itself
+unhealthy. The response never includes keys, document content, or file system paths.
 
 ## GET /v1/printers
 
@@ -227,3 +184,61 @@ The complete encoded JSON body, including escaped HTML and templates, counts
 against the 25 MiB application limit; the host applies a 32 MiB outer ceiling.
 Request compression is not supported. Large embedded images are the usual reason
 to approach the limit; prefer SVG or appropriately sized raster `data:` URLs.
+
+## Asynchronous jobs (opt-in)
+
+When the server sets `Jobs:Enabled` to `true`, these routes are registered;
+otherwise they return 404. They use the configured access mode. A job's owner is
+the API key that submitted it: another key always receives 404, including on
+deletion. Anonymous callers share one owner and can list and read each other's
+jobs, so use API-key mode for private work.
+
+| Endpoint | Response |
+|---|---|
+| `POST /v1/jobs` | Same body and validation as `/v1/render`; 202 with the job JSON, a `Location` header and `Retry-After`. Queue or quota pressure returns 429 with `Retry-After` |
+| `GET /v1/jobs/{id}` | The job JSON; `Retry-After` while queued or rendering; 404 for an unknown or another owner's ID |
+| `GET /v1/jobs/{id}/result` | The PDF with `Content-Disposition`, `X-Render-Pages`, `X-Render-Duration-Ms` and `Cache-Control: no-store`. 409 with `Retry-After` before completion or while another download is in progress; 410 after cancellation or expiry |
+| `DELETE /v1/jobs/{id}` | 204. Cancels queued or active work, or deletes a stored result. Repeating it is still 204 while the metadata exists; unknown or other-owner IDs return 404 |
+| `GET /v1/jobs?status=&limit=&after=` | `{ items, nextAfter }`: the caller's jobs, newest first. `limit` is 1 to 100 (default 50); `after` is the last ID returned |
+
+### Submitting
+
+Job IDs are 128 random bits written as 32 lowercase hex characters. A submission
+may carry one `Idempotency-Key` header of 1 to 128 visible ASCII characters. The
+same owner and key return the existing job for as long as it is retained, including
+in a terminal or tombstone state, and the first body wins. Use a new key for
+distinct work. Print jobs require an API key and a configured printer identifier,
+exactly as synchronous printing does.
+
+### The job document
+
+A job has `id`, `status` (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`,
+`expired`), `createdUtc`, optional `startedUtc` and `completedUtc`, `expiresUtc`,
+`fileName`, `disposition` and `links`. Queued jobs expose `queuePosition`, the
+global submission order; treat it as an estimate because scheduling rotates
+between owners. Succeeded jobs include `pageCount` and `durationMs`. Failed jobs
+carry an `error` with `type`, `title`, `status`, `detail`, `code` and `retryable`.
+Print jobs include `printer` and a `printJob` receipt, and their result route
+returns 409 because no PDF is retained. Failed jobs also return 409 on the result
+route; decide whether to retry from the job's `error`, not from `Retry-After`.
+
+### Scheduling and restarts
+
+Queue time does not count against the rendering timeout, which starts when the
+job is dispatched. Workers take jobs in submission order but rotate between owners,
+and they never use the render slots reserved for synchronous requests. After a
+restart, queued jobs resume and jobs that were rendering are marked failed with
+the code `interrupted`. There are no automatic retries and no callbacks. A print
+job interrupted mid-submission may or may not have reached the spooler; check the
+queue before resubmitting.
+
+### Retention
+
+The submitted HTML is deleted as soon as a job succeeds. PDFs and the HTML of
+failed jobs follow the [configured retention](../configuration.md#asynchronous-jobs).
+Expired metadata remains as a tombstone for one extra `ResultRetention` period, so
+the result route returns 410 before the ID finally returns 404. With
+`DeleteResultOnDownload` on, a job expires after one complete successful download;
+only one download per job is admitted at a time. Because the server cannot know
+whether the client received every byte, leave that option off when a download may
+need to be repeated.

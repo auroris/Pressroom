@@ -1,46 +1,19 @@
 # Windows / IIS release acceptance
 
-## Container VM verification — 2026-10-31
-
-The supplied Windows Server 2022 Standard VM (also a domain controller) ran Docker
-29.9.2 and the full `windows/server:ltsc2022` image with .NET 10.0.14 copied from
-Microsoft's serviced ASP.NET image. Server Core failed the sandboxed Chromium
-check; the full image passed. The image OS version was `10.0.20348.5773`.
-Playwright 1.64.1, private Node v24.22.1 and Chromium 156.0.8078.4 were matched;
-sandboxing and normal dependency validation remained enabled.
-
-The final image passed authenticated two-page bilingual PDF rendering, invalid-key
-401, empty printer discovery, ContainerUser identity, read-only external settings,
-active-job shutdown, and loss of job state after its `--rm` lifecycle. Startup
-including policy verification/container creation took 23.710 s; clean shutdown
-took 5.516 s with exit code zero. Optional HNS ACLs passed a reachable host TCP
-canary, internet/DNS denial and blocked Windows service ports 135 and 5985 while
-the API remained reachable. Basic startup does not install these rules;
-`-BlockOutbound` explicitly opts in.
-
-Image ID: `sha256:85cff65df926b59a819ee4f96fe08b8ac0e464ee3b5981b0ad08fc1eeb9caf10`.
-Windows base: `sha256:7a15615ebaa86fc085707866747b8806d457ab939a97c98c5af50e6c34b4a5d2`.
-ASP.NET base: `sha256:a0465a65a8e1841eb88f586d9fa2365a0f1b19280a6998d6bd085cb66aec6bed`.
-Evidence is in `artifacts/vm-acceptance` locally and `C:\PressroomTest\final\artifacts`
-on the VM. Subsequent manual builds pull serviced bases and the latest stable
-Playwright and must pass again. Native Windows OS/Chromium vulnerabilities are not
-covered by the workflow's NuGet dependency audit.
-
-These checks **do not qualify IIS or physical printing on this VM**. The direct
-Windows/IIS checklist below remains a separate deployment check.
-
-The Visual Studio publish check proves that the selected payload can launch and
-render on the publishing machine. It does not prove a clean IIS deployment or
-the absence of hidden machine prerequisites. Complete this record against the
-actual published files before calling a release qualified.
+The build-machine package check proves that a release can launch and render on
+the machine that built it. It does not prove a clean IIS deployment or the
+absence of hidden machine prerequisites. Complete this record against the actual
+published files on the target server before calling a release qualified. For
+Windows containers, use the lighter checks in [Containers](container.md); this
+checklist is for direct IIS hosting and physical printing.
 
 ## Record the environment
 
-Record the release manifest, publish profile, Windows Server edition/build,
-.NET/ASP.NET Core and Hosting Bundle versions, IIS configuration, pool identity,
-machine-installed Visual C++ runtime inventory, Media Foundation feature state,
-browser version, font manifest, and configured rendering limits. Preserve the
-exact artifact and this result with the release.
+Record the release manifest, Windows Server edition and build, .NET, ASP.NET Core
+and Hosting Bundle versions, IIS configuration, pool identity, machine-installed
+Visual C++ runtime inventory, Media Foundation feature state, browser version,
+font manifest, and configured rendering limits. Preserve the exact artifact and
+this result with the release.
 
 Start with a supported clean Windows Server baseline containing IIS and the .NET
 10 Hosting Bundle. Media Foundation must be absent for the standard qualification.
@@ -49,20 +22,21 @@ first recording the exact missing dependency. The Hosting Bundle's own baseline
 components are part of the stated prerequisite; document them separately.
 
 Use a fresh location with no developer Playwright browser cache and no dependency
-validation markers. Do not provide Node/npm, the .NET SDK, PowerShell 7, or network
-download access to the application. Grant the real pool identity read/execute
-access to the release and write access only to its external runtime directories.
-Keep normal Playwright validation and `ChromiumSandbox=true` enabled.
+validation markers. Do not provide Node, npm, the .NET SDK, PowerShell 7, or
+network download access to the application. Grant the real pool identity read and
+execute access to the release and write access only to its external runtime
+directories. Keep normal Playwright validation and `ChromiumSandbox=true` enabled.
 
 ## Cold start and published payload
 
 - Start the actual IIS application and confirm `/v1/health` becomes 200 after
-  warm-up. Confirm that `/v1/info` matches the expected release/browser/font
+  warm-up. Confirm that `/v1/info` matches the expected release, browser, and font
   versions. A build-directory run is not a substitute.
 - Submit `samples/orders-bilingual.request.json` through the real site and verify
   a PDF response, two pages, Letter portrait dimensions, page numbers, vector
-  graphic, bold/italic faces, French accents/ligatures, outlines, and requested
-  tagging. Inspect the generated PDF visually and with your PDF inspection tool.
+  graphic, bold and italic faces, French accents and ligatures, outlines, and
+  requested tagging. Inspect the generated PDF visually and with your PDF
+  inspection tool.
 - The sample requests `disposition: "inline"`. Verify that response's
   `Content-Disposition`, repeat with `"attachment"`, and repeat with the property
   omitted to check the attachment default. Confirm safe filenames in both modes.
@@ -70,18 +44,16 @@ Keep normal Playwright validation and `ChromiumSandbox=true` enabled.
   it must carry the chosen mode, not just copy the PDF bytes. Invalid disposition
   values must return 400. Browser PDF settings can affect inline display.
 - Verify a caller-embedded image and font in addition to the packaged Noto Sans
-  faces. Verify generic header/footer typography independently; page CSS and fonts
-  do not automatically apply to Chromium's header/footer templates. Custom embedded
-  header/footer fonts are not supported in this initial build: an observed Linux
-  test fell back to a system font despite its data-backed font rule. Any later
-  supported custom-header/font feature needs a new explicit acceptance test.
-- Restart the pool and repeat. Confirm owned browser/driver processes from the
+  faces. Verify generic header and footer typography independently; page CSS and
+  fonts do not automatically apply to Chromium's header and footer templates, and
+  custom embedded header or footer fonts are not supported.
+- Restart the pool and repeat. Confirm owned browser and driver processes from the
   old worker exit; unrelated machine browsers must remain untouched.
 - Confirm Windows Job Object assignment works under the real IIS identity,
   including any nesting imposed by IIS. The renderer assigns its private Node
   process before browser launch and tracks its descendants in that job; inability
-  to establish that ownership must fail startup. Exercise shutdown/crash cleanup
-  and confirm the owned job reaches zero active processes.
+  to establish that ownership must fail startup. Exercise shutdown and crash
+  cleanup and confirm the owned job reaches zero active processes.
 - Confirm the release directory is not writable to the pool and that startup
   still succeeds without writing a dependency-validation marker there.
 
@@ -106,13 +78,12 @@ status codes and `WWW-Authenticate` headers.
 | Invalid key settings or duplicate configured secrets | Startup fails with a configuration error |
 
 Verify `/v1/health` remains anonymous in both modes. Verify `/v1/info` and OpenAPI
-require a valid key in API-key mode. API tests with a controlled host do not
-replace these deployment checks.
-Use a document with inline scripts, data-backed scripts, event handlers and child
-frames to confirm they do not execute when JavaScript is disabled. Check that
-static text, embedded images, CSS and packaged fonts still render. A caller
-readiness function with JavaScript effectively disabled must return 400, including
-when the request says `javaScript: true` but the key lacks permission.
+require a valid key in API-key mode. Use a document with inline scripts,
+data-backed scripts, event handlers and child frames to confirm they do not
+execute when JavaScript is disabled. Check that static text, embedded images, CSS
+and packaged fonts still render. A caller readiness function with JavaScript
+effectively disabled must return 400, including when the request says
+`javaScript: true` but the key lacks permission.
 
 Change a rendering limit and a valid key in the external JSON file, restart, and
 confirm both changes take effect. Check that the application reads the file named
@@ -130,13 +101,6 @@ Save to an absolute path outside the temporary job directory. Expect 202 JSON,
 `status: submitted`, a correlation `jobId`, `printer: pdf-test`, and `pageCount: 2`.
 Inspect both pages of the saved output. The returned job ID is not a spooler ID,
 and the response does not confirm physical printing.
-
-On 2026-10-30, the local Windows test passed with SumatraPDF 3.6.1 and Microsoft
-Print to PDF. The user completed the save dialog, the API returned a two-page
-submission receipt, and the output was preserved under
-`artifacts/print-test/microsoft-print-to-pdf.pdf`. A nonexistent configured Windows
-printer returned 502, and an anonymous print request returned 401. This desktop
-test does not establish IIS identity or physical-printer acceptance.
 
 For production acceptance, repeat against an actual configured printer under the
 dedicated IIS identity, which needs print permission and access to SumatraPDF.
@@ -156,53 +120,55 @@ outer-limit rejection may use a native IIS response.
 
 Fill active and waiting capacity, verify 429 and `Retry-After`, and confirm queue
 saturation alone does not make `/v1/health` fail. Cancel queued and active requests,
-including an expensive script/print operation using an opted-in key. Confirm capacity is actually
-released and follow-up renders complete. Readiness failures should return 422;
-the overall deadline should return 504 and terminate the request's browser work.
+including an expensive script or print operation using an opted-in key. Confirm
+capacity is actually released and follow-up renders complete. Readiness failures
+should return 422; the overall deadline should return 504 and terminate the
+request's browser work.
 
-Try HTTP(S), local-file, frame/popup, CSS, fetch/XHR, WebSocket, and service-worker
-resource access from controlled fixture documents. Run script-based probes with
-an opted-in key so the attempts actually execute. Confirm the intended blocking
-and confirm logs contain no raw URLs, document text, page errors/console text,
-PDF content, or keys. A strict no-egress requirement also needs an independently
-enforced network policy.
+Try HTTP(S), local-file, frame and popup, CSS, fetch and XHR, WebSocket, and
+service-worker resource access from controlled fixture documents. Run script-based
+probes with an opted-in key so the attempts actually execute. Confirm the intended
+blocking and confirm logs contain no raw URLs, document text, page errors or
+console text, PDF content, or keys. A strict no-egress requirement also needs an
+independently enforced network policy.
 
 ## Recycle, update, rollback, and soak
 
 Perform at least 1,000 representative successful renders at configured concurrency,
-crossing planned browser-recycle thresholds. Record errors/retries, memory peaks,
-process counts, response times, and post-idle memory. Include slow clients so
-buffered PDF response admission is exercised. Confirm bounded memory/process
+crossing planned browser-recycle thresholds. Record errors and retries, memory
+peaks, process counts, response times, and post-idle memory. Include slow clients
+so buffered PDF response admission is exercised. Confirm bounded memory and process
 growth rather than judging only total throughput.
 
-Trigger an IIS recycle during traffic and verify readiness/recovery and cleanup.
+Trigger an IIS recycle during traffic and verify readiness, recovery, and cleanup.
 Test an owned-browser crash and supervised replacement. Budget for IIS overlapped
 worker processes or explicitly choose non-overlapped recycling.
 
-Publish an update using your normal Visual Studio profile, then restore the entire
-previous release using that same transport. Verify readiness, version identity,
-the configured access mode, and a PDF after each operation. Keep configuration, logs, and
-temporary state outside the replaceable site directory. A partial file-copy or
-warm-up failure must not be treated as a successful deployment.
+Deploy an update using your normal procedure, then restore the entire previous
+release the same way. Verify readiness, version identity, the configured access
+mode, and a PDF after each operation. Keep configuration, logs, and temporary
+state outside the replaceable site directory. A partial file copy or warm-up
+failure must not be treated as a successful deployment.
 
 ## Optional asynchronous jobs
 
-- Submit 500 documents through RenderManyAsync while measuring concurrent sync
-  p95; target at most twice idle latency with no additional sync 429s.
-- Restart with 100 queued and one active job. Queued work resumes; one interrupted
-  render fails/retryable. Printing interruption needs Windows spooler review.
-- Verify two keys cannot list/read/download/delete each other's jobs.
-- Exercise global/per-key queues, disk quota, cancellation, expiry and
+- Submit a batch of several hundred documents while measuring concurrent
+  synchronous p95 latency; target at most twice idle latency with no additional
+  synchronous 429s.
+- Restart with queued and active jobs. Queued work resumes; the interrupted
+  render fails as retryable. Printing interruption needs Windows spooler review.
+- Verify two keys cannot list, read, download, or delete each other's jobs.
+- Exercise global and per-key queues, disk quota, cancellation, expiry and
   delete-on-download. Expired content disappears within two sweeper intervals;
   an active download retains its open file until its stream closes.
 - Inspect protected service-SID ACLs, metadata-only logs, and the instance lock.
-- Disable overlapped IIS recycling for local storage; test stop/start updates and
-  rollback without replacing the jobs directory.
+- Disable overlapped IIS recycling for local storage; test stop and start updates
+  and rollback without replacing the jobs directory.
 
 ## Result
 
 Record **passed**, **failed**, or **not run** for each area, with the exact artifact,
 machine inventory, measurements, and outstanding limitations. A diagnostic host
-validation bypass, static DLL scan, or successful developer-machine publish alone
+validation bypass, static DLL scan, or successful build-machine package check alone
 does not satisfy this gate. Requalify after changing the browser or native runtime
-payload; qualify the self-contained profile separately if it is released.
+payload.

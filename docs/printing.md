@@ -156,5 +156,6 @@ automatically retry print requests, and neither does the .NET client's
 `Microsoft Print to PDF` is a convenient manual target. Select it as `pdf-test` and
 complete its **Save Print Output As** dialog before the request times out. Because
 it prompts for a destination file, it is a manual test target, not an unattended
-IIS destination. The [acceptance record](windows-acceptance.md) includes the
-printer checks for a real deployment.
+IIS destination. The [Windows acceptance checklist](windows-acceptance.md) and the
+[Linux acceptance checklist](linux.md#acceptance-checklist) include the printer
+checks for a real deployment.

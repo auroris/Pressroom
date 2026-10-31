@@ -161,25 +161,30 @@ Use one instance per state root. JSON time spans use `hh:mm:ss` or `d.hh:mm:ss`.
 | `Jobs:MaxStoredBytes` | `2147483648` | 2 GiB, including 16 KiB metadata reserve/job; allowed 1 MiB–1 TiB |
 | `Jobs:DeleteResultOnDownload` | `false` | Delete after the first complete successful download |
 
-All durations must be one second to 30 days. Queue limits exclude active jobs.
-Sync waiters take priority; background jobs never consume reserved slots.
-Job rendering deadlines start at dispatch, excluding queue time.
+All durations must be between one second and 30 days. The queue limits count
+waiting jobs only, not the ones being rendered. Synchronous requests always take
+priority: background jobs never use the reserved render slots, and a job's
+rendering deadline starts when it is dispatched, not when it was queued.
 
-Admission returns 429/Retry-After on queue/quota pressure. An oversized result
-fails with `storage_full`. Serialized atomic writes may temporarily use one extra
-result's space. Counters include metadata reserve, not filesystem allocation;
-logs and temporary browser files are outside this budget.
+When the queue or the per-key quota is full, submission returns 429 with
+`Retry-After`. A result that would exceed `MaxStoredBytes` fails the job with the
+code `storage_full`. Writes are atomic, so the store may briefly need space for one
+extra result. The byte counters include the metadata reserve but not file system
+allocation; logs and the browser's temporary files are outside this budget.
 
-Sweeping runs on startup, admission/reads, and every minute. Success removes HTML
-immediately. Failed HTML expires at RequestRetention or job expiry, whichever
-comes first. Expired content is deleted; tombstones last one additional
-ResultRetention window before IDs return 404. Active downloads pin their file
-until the stream closes. A job whose files cannot be removed yet, for example
-because another process holds one open, is logged as a warning and retried by a
-later sweep without affecting other jobs. A storage error while running a job is
-logged and marks that job failed where possible; it never stops the service or
-synchronous rendering. Disabling jobs stops sweeping old storage; drain/delete
-jobs before disabling if retention must continue.
+Old jobs are swept at startup, whenever a job is submitted or read, and once a
+minute. Successful jobs lose their HTML immediately. The HTML of failed jobs is
+kept until `RequestRetention` or the job's expiry, whichever comes first. Expired
+content is deleted, and the job's metadata stays as a tombstone for one more
+`ResultRetention` window before the ID returns 404. A result that is being
+downloaded is kept until the download finishes.
+
+A job whose files cannot be removed yet, for example because a backup or scanner
+holds one open, is logged as a warning and retried on a later sweep without
+affecting other jobs. A storage error while a job runs is logged and marks that job
+failed where possible; it never stops the service or synchronous rendering.
+Disabling jobs also stops the sweeper, so drain or delete jobs first if retention
+must continue.
 
 ## Startup validation
 

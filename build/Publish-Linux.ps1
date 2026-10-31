@@ -1,7 +1,7 @@
 #requires -Version 7.0
 # -PlaywrightVersion: 'pinned' (default) restores the checked-in lock files unchanged; 'latest' or an
 # explicit different version refreshes them inside this disposable build.
-param([string]$Version = '0.1.0', [string]$OutputDirectory = '/out', [string]$PlaywrightVersion = 'pinned')
+param([string]$Version = '1.1.0', [string]$OutputDirectory = '/out', [string]$PlaywrightVersion = 'pinned')
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsLinux()) { throw 'Run this helper on Linux x64.' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
