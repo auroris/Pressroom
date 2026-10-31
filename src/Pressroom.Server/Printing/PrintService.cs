@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Pressroom.Contracts;
 using Pressroom.Rendering;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Jobs;
 
 namespace Pressroom.Server.Printing;
 
@@ -48,10 +49,12 @@ public sealed class PrintService : IPrintService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (OperatingSystem.IsLinux())
-                Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            else
-                Directory.CreateDirectory(profile);
+            // The PDF holds document content: give its folder the same owner-only protection as job
+            // storage (mode 0700, or a protected DACL for the service identity on Windows). On Windows
+            // the shared temp parent is created first so it keeps its ordinary inherited permissions.
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
+            PrivateFiles.Directory(directory);
+            if (!OperatingSystem.IsLinux()) Directory.CreateDirectory(profile);
             await File.WriteAllBytesAsync(file, document.Pdf, cancellationToken);
             var start = new ProcessStartInfo(OperatingSystem.IsLinux() ? _settings.CupsCommandPath : _settings.SumatraPdfPath)
             {

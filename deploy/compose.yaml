@@ -3,6 +3,9 @@ services:
     image: ghcr.io/auroris/pressroom:${PRESSROOM_VERSION:?Select a release version}
     ports: ["127.0.0.1:8080:8080"]
     read_only: true
+    # Docker's minimal init runs as PID 1: it forwards SIGTERM to the service and reaps
+    # orphaned Chromium descendants, which .NET as PID 1 would leave as zombies.
+    init: true
     user: "10001:10001"
     security_opt:
       - no-new-privileges:true

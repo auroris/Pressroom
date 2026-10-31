@@ -89,7 +89,7 @@ Compose publishes only `127.0.0.1:8080`. Place an HTTPS reverse proxy on the hos
 for remote clients. The equivalent isolated single-container command is:
 
 ```sh
-docker run -d --name pressroom -p 127.0.0.1:8080:8080 \
+docker run -d --name pressroom --init -p 127.0.0.1:8080:8080 \
   --network pressroom-egress-blocked --dns 127.0.0.1 \
   --read-only --user 10001:10001 --cap-drop ALL \
   --security-opt no-new-privileges \
@@ -101,7 +101,13 @@ docker run -d --name pressroom -p 127.0.0.1:8080:8080 \
   ghcr.io/auroris/pressroom:<version>
 ```
 
-The service is PID 1 and receives SIGTERM directly. Health probes use `/v1/health`;
+Keep `init: true` (Compose) or `--init` (`docker run`). The image's entry point is
+`dotnet` itself, and a process running as PID 1 inherits every orphaned descendant
+in the container. If a Chromium helper outlives its parent, .NET does not reap it
+and it would remain a zombie holding a process slot. Docker's minimal init runs as
+PID 1 instead: it reaps those orphans and forwards SIGTERM to the service, so
+graceful shutdown is unchanged. The build and test helpers run the image the same
+way. Health probes use `/v1/health`;
 a full jobs queue is not unhealthy. Keep the stop timeout above ShutdownTimeoutMs
 plus cleanup margin. Console logs are available through Docker; files inside the
 state filesystem are temporary. Application settings are JSON-only;
@@ -119,7 +125,10 @@ memory-backed temporary storage, one replica, and a NetworkPolicy allowing only
 TCP 8080 ingress with no egress. The CNI must enforce NetworkPolicy. Install the
 seccomp profile under each node's kubelet. `emptyDir` lasts for the Pod lifetime;
 replacing a Pod removes its state. This manifest has not been exercised on a
-Kubernetes cluster by the VM tests.
+Kubernetes cluster by the VM tests. Kubernetes has no `init: true` equivalent, so
+by default the service is PID 1 in its Pod. Set `shareProcessNamespace: true` (the
+pause container then reaps orphans) or use a derived image whose entry point is a
+tiny init such as `tini` if orphaned Chromium processes must be reaped.
 
 ## Build and verify
 
@@ -130,11 +139,16 @@ pwsh ./build/Build-Container.ps1 -Version 0.1.0 -Image pressroom:local
 ```
 
 Use a fresh `artifacts/container-publish` directory. The builder performs locked
-restore, tests, and a complete publish as UID 10001 with the seccomp profile. Each
-container build first resolves the latest stable `Microsoft.Playwright`, refreshes
-its transitive lock files together in the disposable builder, and bundles its
-matching driver and Chromium. `-PlaywrightVersion <version>` reproduces a recorded
-version. Ordinary source builds retain the checked-in dependency lock. The
+restore, tests, and a complete publish as UID 10001 with the seccomp profile. By
+default it uses the repository's pinned `Microsoft.Playwright` (the
+`PressroomPlaywrightVersion` property) and the checked-in lock files unchanged, so
+the payload matches the Windows package and can be reproduced from the commit.
+`-PlaywrightVersion latest` is an explicit opt-in that resolves the newest stable
+release, and `-PlaywrightVersion <version>` selects or reproduces a recorded one.
+Either refreshes the transitive lock files together in the disposable builder
+before bundling the matching driver and Chromium. `build/Build-WindowsContainer.ps1`
+accepts the same values. On Windows that refresh rewrites the lock files in the
+checkout, so do not commit it unless you are deliberately upgrading the pin. The
 runtime is built from that verified payload. This two-step build is intentional:
 Docker build RUN steps cannot use the runtime's seccomp profile. The builder
 needs network access to acquire dependencies; the running service does not.
@@ -158,8 +172,11 @@ in GitHub's package settings for anonymous pulls.
 
 Linux tags are `<version>-linux`, `<version>`, `latest-linux`, and `latest`.
 Windows tags are `<version>-windows-ltsc2022` and `latest-windows-ltsc2022`.
-Prereleases never update the latest tags. Each run resolves Playwright once for
-both platforms, pulls current compatible bases, and retains verification/provenance
+Prereleases never update the latest tags. Each run of this workflow deliberately
+resolves the latest stable Playwright once and passes that version to both
+platform builds, so images track current Chromium; the Packages workflow instead
+builds installers from the pinned version. Each run also pulls current compatible
+bases and retains verification/provenance
 artifacts. Linux publication also requires the SBOM and critical-CVE gate.
 
 ## Windows containers

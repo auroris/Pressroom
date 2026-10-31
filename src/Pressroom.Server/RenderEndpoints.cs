@@ -144,39 +144,15 @@ public static class RenderEndpoints
                 return;
             }
 
-            if (request.Options is { } suppliedOptions)
-            {
-                // Permissions come only from the API-key handler, never an unrelated
-                // host identity. A request can disable scripts but cannot grant them.
-                var javaScriptPermitted = authentication.Succeeded
-                    && authentication.Principal?.HasClaim(AuthenticationNames.JavaScriptClaim, "true") == true;
-                request = request with
-                {
-                    Options = suppliedOptions with
-                    {
-                        JavaScript = suppliedOptions.JavaScript && javaScriptPermitted,
-                        PageSize = suppliedOptions.PageSize ?? PageSize.Named(settings.DefaultPageSize),
-                        TimeoutMs = suppliedOptions.TimeoutMs ?? settings.DefaultTimeoutMs
-                    }
-                };
-            }
-            var errors = RequestValidator.Validate(request, settings.MaxTimeoutMs);
-            if (request.Printer is not null && !errors.ContainsKey("printer")
-                && !printing.Printers.Contains(request.Printer, StringComparer.OrdinalIgnoreCase))
-                errors["printer"] = ["Select a printer identifier configured in Printing:Printers."];
+            request = Prepare(request, authentication, settings, printing, out var errors);
             if (errors.Count == 0)
             {
-                var effectiveOptions = request.Options!;
-                var remaining = TimeSpan.FromMilliseconds(effectiveOptions.TimeoutMs!.Value) - Stopwatch.GetElapsedTime(admittedAt);
+                // The parsed deadline includes time already spent reading and checking the body.
+                var remaining = TimeSpan.FromMilliseconds(request.Options!.TimeoutMs!.Value) - Stopwatch.GetElapsedTime(admittedAt);
                 if (remaining <= TimeSpan.Zero)
                     deadline.Cancel();
                 else
                     deadline.CancelAfter(remaining);
-                deadline.Token.ThrowIfCancellationRequested();
-
-                RejectBase(request.Html, "html", errors);
-                RejectBase(request.Options!.HeaderTemplate, "options.headerTemplate", errors);
-                RejectBase(request.Options.FooterTemplate, "options.footerTemplate", errors);
             }
             deadline.Token.ThrowIfCancellationRequested();
             if (errors.Count != 0)
@@ -291,7 +267,44 @@ public static class RenderEndpoints
         return string.IsNullOrWhiteSpace(encoding) || string.Equals(encoding, "identity", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static void RejectBase(string? html, string field, IDictionary<string, string[]> errors)
+    /// <summary>
+    /// Applies caller permissions and service defaults to a parsed request, then validates it. Synchronous
+    /// renders and job submissions both use this so a stored job is held to exactly the same rules.
+    /// </summary>
+    internal static RenderRequest Prepare(RenderRequest request, AuthenticateResult authentication, RenderSettings settings,
+        IPrintService printing, out Dictionary<string, string[]> errors)
+    {
+        if (request.Options is { } suppliedOptions)
+        {
+            // Permissions come only from the API-key handler, never an unrelated
+            // host identity. A request can disable scripts but cannot grant them.
+            var javaScriptPermitted = authentication.Succeeded
+                && authentication.Principal?.HasClaim(AuthenticationNames.JavaScriptClaim, "true") == true;
+            request = request with
+            {
+                Options = suppliedOptions with
+                {
+                    JavaScript = suppliedOptions.JavaScript && javaScriptPermitted,
+                    PageSize = suppliedOptions.PageSize ?? PageSize.Named(settings.DefaultPageSize),
+                    TimeoutMs = suppliedOptions.TimeoutMs ?? settings.DefaultTimeoutMs
+                }
+            };
+        }
+        errors = RequestValidator.Validate(request, settings.MaxTimeoutMs);
+        // A malformed identifier keeps its specific validation message.
+        if (request.Printer is not null && !errors.ContainsKey("printer")
+            && !printing.Printers.Contains(request.Printer, StringComparer.OrdinalIgnoreCase))
+            errors["printer"] = ["Select a printer identifier configured in Printing:Printers."];
+        if (errors.Count == 0)
+        {
+            RejectBase(request.Html, "html", errors);
+            RejectBase(request.Options!.HeaderTemplate, "options.headerTemplate", errors);
+            RejectBase(request.Options.FooterTemplate, "options.footerTemplate", errors);
+        }
+        return request;
+    }
+
+    private static void RejectBase(string? html, string field, IDictionary<string, string[]> errors)
     {
         if (!string.IsNullOrEmpty(html) && DocumentValidator.HasBaseElement(html))
             errors[field] = ["The base element is not supported. Embed all document resources."];

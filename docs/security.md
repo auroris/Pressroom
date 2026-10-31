@@ -58,9 +58,10 @@ renders remain usable.
 - Synchronous PDF-only requests do not deliberately store input HTML or output PDFs. Renders
   write no PDF file; the page count is read from the in-memory document.
 - Printer requests write the PDF to a private job directory under
-  `<StateRoot>/temp` for SumatraPDF or CUPS and remove it after submission. Linux
-  print directories use mode 0700. The OS
-  spooler may retain data independently.
+  `<StateRoot>/temp` for SumatraPDF or CUPS and remove it after submission. Like
+  job storage, print directories are owner-only: mode 0700 on Linux, and on Windows
+  a protected access list granting only the service identity. The OS spooler may
+  retain data independently.
 - Logs are metadata only: identifiers, sizes, timings, page counts, outcomes, and
   blocked-resource counts. They never include document bodies, PDF bytes, secrets,
   blocked URLs, or page console and error text. Page diagnostics returned to the

@@ -142,7 +142,11 @@ fonts, documentation and a file-hash manifest, and require the .NET 10 ASP.NET C
 runtime. IIS also needs the Hosting Bundle. Linux needs the documented native
 libraries and sandbox policy, and runs as an unprivileged user. Docker is used to
 build and verify the Linux payload, but is not required for its local installation.
-Both installer builds use the repository's locked Playwright version.
+Both installer builds use the repository's pinned Playwright version
+(`PressroomPlaywrightVersion` with the checked-in lock files, restored in locked
+mode without a refresh), so one release carries one Chromium build and can be
+rebuilt from its commit. The workflow fails if either package manifest records a
+different version.
 
 The workflow tests both client target frameworks and compiles fresh consumers
 against the actual packages. Installer jobs require the sandboxed browser checks;
@@ -161,9 +165,11 @@ tag or draft, inspect it before retrying. A package-only run can reuse a version
 ## Packages
 
 For container-only builds, use **Actions → Container images → Run workflow**.
-It has only a `workflow_dispatch` trigger, resolves the latest stable Playwright
-once, pulls current compatible Linux/Windows bases, and tests before optionally
+It has only a `workflow_dispatch` trigger, deliberately resolves the latest stable
+Playwright once, pulls current compatible Linux/Windows bases, and tests before optionally
 publishing to GHCR with GitHub's built-in token. No Docker Hub account is needed.
+Run locally, the container build helpers default to the pinned version;
+`-PlaywrightVersion latest` is an explicit opt-in.
 See [containers](container.md) for tags, test-only runs and optional firewall rules.
 
 Contracts and Client target `net8.0;net10.0`. The server and renderer remain .NET 10

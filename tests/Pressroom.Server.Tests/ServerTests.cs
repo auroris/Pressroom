@@ -28,6 +28,21 @@ namespace Pressroom.Server.Tests;
 public sealed class ServerTests
 {
     [Fact]
+    public void TestHostLoadsOnlyPackagedDefaultsAndItsOwnSettingsFile()
+    {
+        // The harness adds no configuration sources of its own, so the files present here are
+        // exactly those the entry point opened. The machine-wide default must never be one of them.
+        using var app = new TestApplication();
+        var configuration = (IConfigurationRoot)app.Services.GetRequiredService<IConfiguration>();
+        var files = configuration.Providers.OfType<FileConfigurationProvider>()
+            .Select(provider => provider.Source.FileProvider!.GetFileInfo(provider.Source.Path!).PhysicalPath!)
+            .Select(path => Path.GetFullPath(path)).ToArray();
+        Assert.Equal(new[] { Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "appsettings.json")), Path.GetFullPath(app.SettingsPath) }, files);
+        Assert.DoesNotContain(Path.GetFullPath(ApplicationConfiguration.DefaultConfigurationFile), files);
+        Assert.Equal(TestApplication.Secret, configuration["Auth:ApiKeys:integration-test:Secret"]);
+    }
+
+    [Fact]
     public async Task HealthIsAnonymousButInfoAndOpenApiRequireAuthentication()
     {
         using var app = new TestApplication();
@@ -516,10 +531,12 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
     public FakePrintService Printing { get; } = new();
     public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource WriteRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public string SettingsPath => Path.Combine(_stateRoot, "pressroom.settings.json");
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected override IHost CreateHost(IHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        // The entry point loads configuration before ConfigureWebHost callbacks run, so the file
+        // must exist and be selected here. Real JSON keys then bind through production options.
         Directory.CreateDirectory(_stateRoot);
         var auth = new Dictionary<string, object>
         {
@@ -530,15 +547,13 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
                 ["static-test"] = new() { Secret = StaticSecret }
             } : new Dictionary<string, ApiKeySettings>()
         };
-        var settingsPath = Path.Combine(_stateRoot, "pressroom.settings.json");
-        File.WriteAllText(settingsPath, JsonSerializer.Serialize(new { Auth = auth }));
-        builder.ConfigureAppConfiguration((_, configuration) =>
-        {
-            // Bind real JSON keys through production options while isolating the test host
-            // from any settings loaded from the developer's conventional external path.
-            configuration.Sources.Clear();
-            configuration.AddJsonFile(settingsPath, optional: false, reloadOnChange: false);
-        });
+        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new { Auth = auth }));
+        return base.CreateHost(TestHost.SelectConfigurationFile(builder, SettingsPath));
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
         builder.ConfigureServices(services =>
         {
             // These tests exercise HTTP behavior, not log sinks. Avoid opening a process-wide
@@ -617,6 +632,19 @@ internal sealed class TestApplication(bool preauthenticatedPrincipal = false, lo
             next(builder);
         };
     }
+}
+
+internal static class TestHost
+{
+    /// <summary>
+    /// Selects the settings file the way an operator's --config does. WebApplicationFactory hands
+    /// host configuration to Program.Main as --key=value arguments before the entry point builds its
+    /// configuration, so ApplicationConfiguration never opens the machine-wide default file. That file
+    /// may hold production secrets, or be unreadable by the test user (root:pressroom 0640).
+    /// </summary>
+    public static IHostBuilder SelectConfigurationFile(IHostBuilder builder, string path) =>
+        builder.ConfigureHostConfiguration(configuration =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["config"] = path }));
 }
 
 internal sealed class FakeRenderer : IHtmlRenderer

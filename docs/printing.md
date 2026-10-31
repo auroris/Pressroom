@@ -103,8 +103,9 @@ directory under `<StateRoot>/temp`, and invokes SumatraPDF's
 [`-print-to` command](https://www.sumatrapdfreader.org/docs/Command-line-arguments)
 on Windows, or [`lp -d`](https://www.cups.org/doc/man-lp.html) /
 [`lpr -P`](https://www.cups.org/doc/man-lpr.html) on Linux. Queue names and file
-paths are passed as separate arguments without a shell. Linux job directories
-are accessible only to the service user (0700).
+paths are passed as separate arguments without a shell. Job directories are
+accessible only to the service user: mode 0700 on Linux, and a protected access
+list on Windows.
 When the helper reports success the response is **202 Accepted** with
 `application/json`:
 

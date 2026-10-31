@@ -694,6 +694,13 @@ public sealed class BrowserRenderer : IHtmlRenderer, IHostedService, IDisposable
             throw new InvalidOperationException("The private Playwright driver is missing. Copy the complete published directory, including .playwright.");
         Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsers);
         Environment.SetEnvironmentVariable("PLAYWRIGHT_NODEJS_PATH", _nodePath);
+        // Deliberately process-wide: the driver and Chromium inherit this environment, so their
+        // temporary files land in this instance's private directory under StateRoot rather than a
+        // shared system temp. The effect is not scoped to the renderer. Every later Path.GetTempPath()
+        // in this process, including other libraries in an in-process host, resolves here, and
+        // StopAsync (or a failed start) deletes the directory recursively without restoring the
+        // previous values. Hosts that need their own temporary files must not rely on TEMP/TMP/TMPDIR
+        // after starting a renderer, and a second renderer in one process redirects them again.
         Environment.SetEnvironmentVariable("TEMP", _instanceDirectory);
         Environment.SetEnvironmentVariable("TMP", _instanceDirectory);
         Environment.SetEnvironmentVariable("TMPDIR", _instanceDirectory);

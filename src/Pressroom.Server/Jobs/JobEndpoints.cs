@@ -84,22 +84,7 @@ public static class JobEndpoints
                 await context.ChallengeAsync(AuthenticationNames.ApiKey);
                 return;
             }
-            if (request.Options is { } options)
-                request = request with { Options = options with
-                {
-                    JavaScript = options.JavaScript && authentication.Succeeded && authentication.Principal?.HasClaim(AuthenticationNames.JavaScriptClaim, "true") == true,
-                    PageSize = options.PageSize ?? PageSize.Named(settings.DefaultPageSize),
-                    TimeoutMs = options.TimeoutMs ?? settings.DefaultTimeoutMs
-                } };
-            var errors = RequestValidator.Validate(request, settings.MaxTimeoutMs);
-            if (request.Printer is not null && !printing.Printers.Contains(request.Printer, StringComparer.OrdinalIgnoreCase))
-                errors["printer"] = ["Select a printer identifier configured in Printing:Printers."];
-            if (errors.Count == 0)
-            {
-                RenderEndpoints.RejectBase(request.Html, "html", errors);
-                RenderEndpoints.RejectBase(request.Options!.HeaderTemplate, "options.headerTemplate", errors);
-                RenderEndpoints.RejectBase(request.Options.FooterTemplate, "options.footerTemplate", errors);
-            }
+            request = RenderEndpoints.Prepare(request, authentication, settings, printing, out var errors);
             if (errors.Count != 0) { await Problems.WriteAsync(context, 400, "Invalid request", errors: errors); return; }
             timeout.Token.ThrowIfCancellationRequested();
             var job = store.Submit(await OwnerAsync(context), request, idempotencyKey);

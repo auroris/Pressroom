@@ -72,12 +72,20 @@ public sealed class PrintingTests
     [InlineData("Microsoft Print to PDF")]
     public async Task InvalidOrUnconfiguredPrinterFailsBeforeRendering(string printer)
     {
-        using var app = new TestApplication();
+        using var app = new TestApplication(jobsEnabled: true);
         using var client = app.CreateAuthenticatedClient();
-        using var response = await client.PostAsJsonAsync("/v1/render", Request(printer), JsonDefaults.Options, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-        Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("printer", out _));
+        // Synchronous and queued requests share one preparation step, so they report the same error:
+        // a malformed identifier keeps its format message; only a well-formed unknown one is "not configured".
+        var messages = new List<string>();
+        foreach (var path in new[] { "/v1/render", "/v1/jobs" })
+        {
+            using var response = await client.PostAsJsonAsync(path, Request(printer), JsonDefaults.Options, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            messages.Add(Assert.Single(problem.RootElement.GetProperty("errors").GetProperty("printer").EnumerateArray()).GetString()!);
+        }
+        Assert.Equal(messages[0], messages[1]);
+        Assert.Equal(printer == "unknown", messages[0].Contains("Printing:Printers", StringComparison.Ordinal));
         Assert.Equal(0, app.Renderer.Calls);
         Assert.Equal(0, app.Printing.Calls);
     }
@@ -201,7 +209,20 @@ public sealed class PrintServiceTests : IDisposable
                 Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(file)!, "profile")));
             }
             else
+            {
                 Assert.Equal(new[] { "-appdata", Path.Combine(Path.GetDirectoryName(file)!, "profile"), "-silent", "-print-to", "Office \"Printer\" -argument" }, start.ArgumentList.Take(5));
+                if (OperatingSystem.IsWindows())
+                {
+                    // Same owner-only protection as job storage: no inherited entries, only the service identity.
+                    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                    var acl = System.IO.FileSystemAclExtensions.GetAccessControl(new DirectoryInfo(Path.GetDirectoryName(file)!));
+                    Assert.True(acl.AreAccessRulesProtected);
+                    var rules = acl.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
+                    Assert.NotEmpty(rules);
+                    foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+                        Assert.Equal(identity.User, rule.IdentityReference);
+                }
+            }
             Assert.Equal(FakeRenderer.Output.Pdf, await File.ReadAllBytesAsync(file, cancellation));
             return exitCode;
         });

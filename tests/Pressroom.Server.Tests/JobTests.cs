@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pressroom.Client;
@@ -200,7 +201,8 @@ public sealed class JobStoreTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "pressroom-jobs-tests", Guid.NewGuid().ToString("N"));
     private readonly TestClock _clock = new();
     private readonly JobsSettings _settings = new() { Enabled = true, ResultRetention = TimeSpan.FromSeconds(5), RequestRetention = TimeSpan.FromSeconds(2), MaxQueueAge = TimeSpan.FromSeconds(3) };
-    private LocalJobStore Store() => new(Options.Create(_settings), Options.Create(new PathsSettings { StateRoot = _root }), _clock);
+    private LocalJobStore Store(ILogger<LocalJobStore>? logger = null) => new(Options.Create(_settings), Options.Create(new PathsSettings { StateRoot = _root }), _clock,
+        logger ?? NullLogger<LocalJobStore>.Instance);
     private static RenderRequest Request(string text = "one") => new() { Html = text, Options = new() { TimeoutMs = 5000 } };
 
     [Fact]
@@ -337,6 +339,129 @@ public sealed class JobStoreTests : IDisposable
         Assert.Equal(new[] { "a1", "b1", "a2" }, order);
     }
 
+    [Fact]
+    public void SweepLeavesAnUndeletableJobForALaterSweepAndKeepsServingTheRest()
+    {
+        var logger = new ListLogger<LocalJobStore>();
+        using var store = Store(logger);
+        store.Initialize();
+        var stuck = store.Submit("key:a", Request(), null).Id;
+        var other = store.Submit("key:a", Request(), null).Id;
+        _clock.Advance(TimeSpan.FromSeconds(4));
+        store.Sweep();
+        Assert.Equal(JobStatus.Expired, store.Get("key:a", stuck)!.Status);
+        var directory = Path.Combine(_root, "jobs", stuck);
+        using (BlockDeletion(directory))
+        {
+            _clock.Advance(TimeSpan.FromSeconds(6));
+            // Every jobs operation sweeps first; none of them may fail because of the one held job.
+            Assert.Equal(stuck, Assert.Single(store.List("key:a", null, 10, null).Items).Id);
+            Assert.Null(store.Get("key:a", other));
+            Assert.False(Directory.Exists(Path.Combine(_root, "jobs", other)));
+            store.Submit("key:b", Request(), null);
+            // Metadata is removed last, so a restart at this point would still recognise the tombstone.
+            Assert.True(File.Exists(Path.Combine(directory, "job.json")));
+        }
+        Assert.NotEmpty(logger.Entries);
+        foreach (var (level, message) in logger.Entries)
+        {
+            Assert.Equal(LogLevel.Warning, level);
+            Assert.Contains(stuck, message);
+            Assert.Contains(OperatingSystem.IsWindows() ? nameof(IOException) : nameof(UnauthorizedAccessException), message);
+            Assert.DoesNotContain(_root, message);
+        }
+        store.Sweep();
+        Assert.Null(store.Get("key:a", stuck));
+        Assert.False(Directory.Exists(directory));
+        Assert.Equal(1, store.Capacity.Stored);
+    }
+
+    // Holds the job's metadata open without delete sharing on Windows, or removes write
+    // permission from its directory on Linux, so that removing the directory fails.
+    private static IDisposable BlockDeletion(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+            return new FileStream(Path.Combine(directory, "job.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        var restore = new Restore(() =>
+        {
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        });
+        try
+        {
+            File.Create(Path.Combine(directory, "probe")).Dispose();
+            File.Delete(Path.Combine(directory, "probe"));
+        }
+        catch (UnauthorizedAccessException) { return restore; }
+        restore.Dispose();
+        Assert.Skip("Directory permissions do not restrict this user (root); the deletion failure cannot be simulated.");
+        return restore;
+    }
+
+    private sealed class Restore(Action action) : IDisposable { public void Dispose() => action(); }
+
+    [Fact]
+    public void ListReportsGlobalQueuePositionsForAFewHundredQueuedJobs()
+    {
+        _settings.MaxQueueAge = TimeSpan.FromMinutes(10);
+        _settings.MaxQueued = _settings.MaxQueuedPerKey = 1000;
+        using var store = Store();
+        store.Initialize();
+        var ids = Enumerable.Range(0, 300).Select(index => store.Submit(index % 2 == 0 ? "a" : "b", Request(), null).Id).ToArray();
+        Assert.True(store.Start(ids[10]));
+        // Positions are global submission order among queued jobs; a started job has none.
+        var expected = ids.Where((_, index) => index != 10).Select((id, index) => (id, Position: (int?)(index + 1)))
+            .ToDictionary(pair => pair.id, pair => pair.Position);
+        expected[ids[10]] = null;
+        foreach (var owner in new[] { "a", "b" })
+        {
+            var items = store.List(owner, null, 500, null).Items;
+            Assert.Equal(150, items.Count);
+            foreach (var item in items) Assert.Equal(expected[item.Id], item.QueuePosition);
+        }
+        var page = store.List("b", JobStatus.Queued, 20, null);
+        Assert.Equal(20, page.Items.Count);
+        Assert.All(page.Items, item => Assert.Equal(expected[item.Id], item.QueuePosition));
+        Assert.Equal(299, store.Get("b", ids[299])!.QueuePosition);
+        Assert.Equal(1, store.Get("a", ids[0])!.QueuePosition);
+    }
+
+    [Fact]
+    public async Task StorageFailuresDuringExecutionAreRecordedWithoutStoppingTheScheduler()
+    {
+        _settings.MaxQueueAge = TimeSpan.FromMinutes(10);
+        using var inner = Store();
+        var store = new FaultingJobStore(inner);
+        var logger = new ListLogger<JobScheduler>();
+        var coordinator = new RenderCoordinator(new FakeRenderer(), Options.Create(new RenderSettings { Concurrency = 2 }));
+        using var scheduler = new JobScheduler(store, coordinator, new FakePrintService(), Options.Create(_settings), logger);
+        inner.Initialize();
+        var unrecorded = inner.Submit("a", Request("unrecorded"), null).Id;
+        var recorded = inner.Submit("a", Request("recorded"), null).Id;
+        var healthy = inner.Submit("a", Request("healthy"), null).Id;
+        store.SucceedFailures.Add(unrecorded);
+        store.SucceedFailures.Add(recorded);
+        store.FailFailures.Add(unrecorded);
+        await scheduler.StartAsync(TestContext.Current.CancellationToken);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (inner.Get("a", healthy)!.Status != JobStatus.Succeeded) await Task.Delay(25, timeout.Token);
+
+        // The scheduler survived both failures, released their render slots, and kept dispatching.
+        Assert.False(scheduler.ExecuteTask!.IsCompleted);
+        var failed = inner.Get("a", recorded)!;
+        Assert.Equal(JobStatus.Failed, failed.Status);
+        Assert.Equal("internal", failed.Error!.Code);
+        // Neither outcome could be stored; the job stays in flight until restart marks it interrupted.
+        Assert.Equal(JobStatus.Rendering, inner.Get("a", unrecorded)!.Status);
+        Assert.Equal(FakeRenderer.Output.Pdf, (await coordinator.RenderAsync(Request("sync"), timeout.Token)).Pdf);
+        await scheduler.StopAsync(TestContext.Current.CancellationToken);
+        Assert.True(scheduler.ExecuteTask.IsCompletedSuccessfully);
+
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Error && entry.Message.Contains(recorded) && entry.Message.Contains(nameof(IOException)));
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Error && entry.Message.Contains(unrecorded) && entry.Message.Contains("could not be recorded"));
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("simulated storage failure"));
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
     private sealed class TestClock : TimeProvider
     {
@@ -344,4 +469,44 @@ public sealed class JobStoreTests : IDisposable
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan duration) => _now += duration;
     }
+
+    /// <summary>Delegates to the real store, throwing a storage exception from selected transitions.</summary>
+    private sealed class FaultingJobStore(LocalJobStore inner) : IJobStore
+    {
+        public ConcurrentBag<string> SucceedFailures { get; } = [];
+        public ConcurrentBag<string> FailFailures { get; } = [];
+        public void Initialize() => inner.Initialize();
+        public RenderJob Submit(string owner, RenderRequest request, string? idempotencyKey) => inner.Submit(owner, request, idempotencyKey);
+        public RenderJob? Get(string owner, string id) => inner.Get(owner, id);
+        public RenderJobPage List(string owner, JobStatus? status, int limit, string? after) => inner.List(owner, status, limit, after);
+        public IReadOnlyList<StoredJob> Queued() => inner.Queued();
+        public RenderRequest? ReadRequest(string id) => inner.ReadRequest(id);
+        public bool Start(string id) => inner.Start(id);
+        public void Succeed(string id, RenderOutput output, long durationMs, PrintJobResult? printJob)
+        {
+            if (SucceedFailures.Contains(id)) throw new IOException("simulated storage failure");
+            inner.Succeed(id, output, durationMs, printJob);
+        }
+        public void Fail(string id, JobError error)
+        {
+            if (FailFailures.Contains(id)) throw new IOException("simulated storage failure");
+            inner.Fail(id, error);
+        }
+        public bool Cancel(string owner, string id) => inner.Cancel(owner, id);
+        public JobDownload? OpenResult(string owner, string id) => inner.OpenResult(owner, id);
+        public void CompleteDownload(string id) => inner.CompleteDownload(id);
+        public void Sweep() => inner.Sweep();
+        public JobCapacity Capacity => inner.Capacity;
+    }
+}
+
+/// <summary>Captures formatted log messages so tests can check they carry metadata only.</summary>
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    private readonly ConcurrentQueue<(LogLevel Level, string Message)> _entries = new();
+    public IReadOnlyList<(LogLevel Level, string Message)> Entries => _entries.Where(entry => entry.Level >= LogLevel.Warning).ToArray();
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public bool IsEnabled(LogLevel logLevel) => true;
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        => _entries.Enqueue((logLevel, formatter(state, exception) + (exception is null ? "" : " " + exception.Message)));
 }

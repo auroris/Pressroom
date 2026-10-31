@@ -63,9 +63,9 @@ jobs:
           $existingTag = git tag --list "v$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository tags.' }
           if ($env:CREATE_RELEASE -eq 'true' -and $existingTag) { throw 'This version already has a tag. Choose a new release version.' }
-          $project = [xml](Get-Content src/Pressroom.Rendering/Pressroom.Rendering.csproj -Raw)
-          $pinned = $project.SelectSingleNode('/Project/PropertyGroup/PressroomPlaywrightVersion').InnerText
-          $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version $pinned
+          # Both installers use the checked-in PressroomPlaywrightVersion and lock files, never a
+          # newer NuGet release, so one release carries one Chromium and rebuilds from the commit.
+          $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version pinned
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
 
   build:
@@ -74,6 +74,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     env:
+      PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
       # Cache only this workflow's dependencies, not the runner's preinstalled packages.
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
@@ -109,6 +110,8 @@ jobs:
             -p:PublishProfile=IisFolder "-p:Version=$env:RELEASE_VERSION" `
             -p:ContinuousIntegrationBuild=true
           if ($LASTEXITCODE -ne 0) { throw 'Publish failed for IisFolder.' }
+          $manifest = Get-Content artifacts/publish/IisFolder/release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.playwrightVersion -ne $env:PLAYWRIGHT_VERSION) { throw "Expected pinned Playwright $env:PLAYWRIGHT_VERSION; packaged $($manifest.playwrightVersion)." }
           ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/publish/IisFolder `
             -OutputDirectory artifacts/release -Version $env:RELEASE_VERSION -Variant framework-dependent
 
@@ -199,8 +202,11 @@ jobs:
       - name: Build and verify as an unprivileged user
         # The runtime smoke check uses the same outbound firewall as deployment.
         # The builder itself needs network access to restore pinned dependencies.
+        # 'pinned' restores the checked-in lock files without a refresh, matching the Windows package.
         run: |
-          ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -PlaywrightVersion $env:PLAYWRIGHT_VERSION -TestNetworkIsolation
+          ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -PlaywrightVersion pinned -TestNetworkIsolation
+          $manifest = Get-Content artifacts/container-publish/release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.playwrightVersion -ne $env:PLAYWRIGHT_VERSION) { throw "Expected pinned Playwright $env:PLAYWRIGHT_VERSION; packaged $($manifest.playwrightVersion)." }
       - name: Package the verified Linux folder
         run: |
           ./build/Package-Pressroom.ps1 -PublishDirectory artifacts/container-publish -OutputDirectory artifacts/linux-release -Version $env:RELEASE_VERSION -Variant framework-dependent -RuntimeIdentifier linux-x64

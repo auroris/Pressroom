@@ -1,12 +1,15 @@
 #requires -Version 7.0
-param([string]$Version = '0.1.0', [string]$OutputDirectory = '/out', [string]$PlaywrightVersion = '')
+# -PlaywrightVersion: 'pinned' (default) restores the checked-in lock files unchanged; 'latest' or an
+# explicit different version refreshes them inside this disposable build.
+param([string]$Version = '0.1.0', [string]$OutputDirectory = '/out', [string]$PlaywrightVersion = 'pinned')
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsLinux()) { throw 'Run this helper on Linux x64.' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $properties = @("-p:Version=$Version", '-p:PlaywrightPlatform=linux-x64')
-if ($PlaywrightVersion) {
-    $PlaywrightVersion = & (Join-Path $PSScriptRoot Resolve-PlaywrightVersion.ps1) -Version $PlaywrightVersion
-    Write-Host "Selected Microsoft.Playwright $PlaywrightVersion and its matching browser."
+$pinned = & (Join-Path $PSScriptRoot Resolve-PlaywrightVersion.ps1) -Version pinned
+$PlaywrightVersion = & (Join-Path $PSScriptRoot Resolve-PlaywrightVersion.ps1) -Version $PlaywrightVersion
+Write-Host "Selected Microsoft.Playwright $PlaywrightVersion and its matching browser."
+if ($PlaywrightVersion -ne $pinned) {
     $properties += "-p:PressroomPlaywrightVersion=$PlaywrightVersion"
     # Refresh all transitive lock files together in the disposable container build.
     dotnet restore Pressroom.slnx --force-evaluate @properties

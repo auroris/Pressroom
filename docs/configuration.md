@@ -174,15 +174,21 @@ Sweeping runs on startup, admission/reads, and every minute. Success removes HTM
 immediately. Failed HTML expires at RequestRetention or job expiry, whichever
 comes first. Expired content is deleted; tombstones last one additional
 ResultRetention window before IDs return 404. Active downloads pin their file
-until the stream closes. Disabling jobs stops sweeping old storage; drain/delete
+until the stream closes. A job whose files cannot be removed yet, for example
+because another process holds one open, is logged as a warning and retried by a
+later sweep without affecting other jobs. A storage error while running a job is
+logged and marks that job failed where possible; it never stops the service or
+synchronous rendering. Disabling jobs stops sweeping old storage; drain/delete
 jobs before disabling if retention must continue.
 
 ## Startup validation
 
 Pressroom refuses to start, and `--check` fails, on invalid limits, missing packaged
 assets, an unusable `StateRoot`, an unknown `Auth:Mode`, invalid key entries,
-duplicate secrets, API-key mode without keys, or unknown properties under `Auth`
-and `Printing`/`Jobs`. Startup also verifies that the launched browser actually enforces
+duplicate secrets, API-key mode without keys, or unknown properties under any
+settings section (`Render`, `Paths`, `Fonts`, `Auth`, `Printing`, and `Jobs`), so
+a misspelt key such as `Render:Concurency` is an error rather than a silently
+ignored setting. Startup also verifies that the launched browser actually enforces
 its connection policy and fails if it does not, including for an executable
 override.
 

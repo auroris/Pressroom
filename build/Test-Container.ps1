@@ -23,7 +23,8 @@ try {
     & docker network inspect $networkName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'For isolation testing, first apply the optional Docker network and iptables instructions in docs/container.md.' }
     $startup = [Diagnostics.Stopwatch]::StartNew()
-    & docker run --detach --name $name --read-only --cap-drop ALL --security-opt no-new-privileges `
+    # --init as in deploy/compose.yaml: a reaping init is PID 1 and forwards SIGTERM to the service.
+    & docker run --detach --init --name $name --read-only --cap-drop ALL --security-opt no-new-privileges `
         --network $networkName --dns 127.0.0.1 `
         --security-opt "seccomp=$profile" --tmpfs /tmp:rw,nosuid,noexec,size=256m --shm-size=1g --stop-timeout 45 `
         --tmpfs /var/lib/pressroom:rw,nosuid,noexec,size=512m,uid=10001,gid=10001,mode=0700 `

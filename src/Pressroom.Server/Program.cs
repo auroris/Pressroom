@@ -80,12 +80,7 @@ public partial class Program
 
         ApplicationConfiguration.Configure(builder.Configuration, AppContext.BaseDirectory, configurationFile);
 
-        builder.Services.AddOptions<RenderSettings>().BindConfiguration("Render");
-        builder.Services.AddOptions<PathsSettings>().BindConfiguration("Paths");
-        builder.Services.AddOptions<FontsSettings>().BindConfiguration("Fonts");
-        builder.Services.AddOptions<AuthSettings>().BindConfiguration("Auth", options => options.ErrorOnUnknownConfiguration = true);
-        builder.Services.AddOptions<PrintingSettings>().BindConfiguration("Printing", options => options.ErrorOnUnknownConfiguration = true);
-        builder.Services.AddOptions<JobsSettings>().BindConfiguration("Jobs", options => options.ErrorOnUnknownConfiguration = true);
+        ApplicationConfiguration.AddSettings(builder.Services);
         builder.Services.AddSingleton<ServerConfiguration>();
         if (!check)
             builder.Services.AddHostedService<ConfigurationValidationService>();

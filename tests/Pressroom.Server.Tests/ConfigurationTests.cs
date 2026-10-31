@@ -1,7 +1,11 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
 using Pressroom.Server.Infrastructure;
+using Pressroom.Server.Jobs;
 using Pressroom.Server.Printing;
 using Xunit;
 
@@ -185,6 +189,54 @@ public sealed class ConfigurationTests : IDisposable
             Environment.SetEnvironmentVariable(variable, original);
         }
     }
+
+    [Theory]
+    [InlineData("Render", "Concurency")]
+    [InlineData("Paths", "StateRot")]
+    [InlineData("Fonts", "Manifests")]
+    [InlineData("Auth", "WindowsEnabled")]
+    [InlineData("Printing", "Printer")]
+    [InlineData("Jobs", "Worker")]
+    public void MisspeltKeysFailBindingInEverySettingsSection(string section, string key)
+    {
+        using var services = BindSettings(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [$"{section}:{key}"] = "1" }).Build());
+        var error = Assert.Throws<InvalidOperationException>(() => Bind(services, section));
+        Assert.Contains(key, error.Message);
+    }
+
+    [Theory]
+    [InlineData("src/Pressroom.Server/appsettings.json")]
+    [InlineData("samples/pressroom.settings.example.json")]
+    [InlineData("deploy/check.settings.json")]
+    public void ShippedSettingsFilesUseOnlyKnownKeys(string relativePath)
+    {
+        var root = AppContext.BaseDirectory;
+        while (!File.Exists(Path.Combine(root, "Pressroom.slnx")))
+            root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar)) ?? throw new InvalidOperationException("Run the tests from a repository checkout.");
+        using var services = BindSettings(new ConfigurationBuilder().AddJsonFile(Path.Combine(root, relativePath)).Build());
+        foreach (var section in new[] { "Render", "Paths", "Fonts", "Auth", "Printing", "Jobs" })
+            Assert.NotNull(Bind(services, section));
+    }
+
+    private static ServiceProvider BindSettings(IConfiguration configuration)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(configuration);
+        ApplicationConfiguration.AddSettings(services);
+        return services.BuildServiceProvider();
+    }
+
+    private static object Bind(IServiceProvider services, string section) => section switch
+    {
+        "Render" => services.GetRequiredService<IOptions<RenderSettings>>().Value,
+        "Paths" => services.GetRequiredService<IOptions<PathsSettings>>().Value,
+        "Fonts" => services.GetRequiredService<IOptions<FontsSettings>>().Value,
+        "Auth" => services.GetRequiredService<IOptions<AuthSettings>>().Value,
+        "Printing" => services.GetRequiredService<IOptions<PrintingSettings>>().Value,
+        "Jobs" => services.GetRequiredService<IOptions<JobsSettings>>().Value,
+        _ => throw new ArgumentOutOfRangeException(nameof(section))
+    };
 
     private void WriteJson(string name, object value) =>
         File.WriteAllText(Path.Combine(_directory, name), JsonSerializer.Serialize(value));

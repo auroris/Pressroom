@@ -9,7 +9,8 @@ using Pressroom.Server.Infrastructure;
 namespace Pressroom.Server.Jobs;
 
 /// <summary>Single-instance durable store. All transitions and quota checks share one lock.</summary>
-public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<PathsSettings> paths, TimeProvider time) : IJobStore, IDisposable
+public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<PathsSettings> paths, TimeProvider time,
+    ILogger<LocalJobStore> logger) : IJobStore, IDisposable
 {
     private const long MetadataAllowance = 16 * 1024;
     private readonly JobsSettings _settings = configured.Value;
@@ -68,7 +69,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
             Sweep();
             var hash = idempotencyKey is null ? null : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(idempotencyKey)));
             var existing = hash is null ? null : _jobs.Values.FirstOrDefault(item => item.Owner == owner && item.IdempotencyHash == hash);
-            if (existing is not null) return View(existing);
+            if (existing is not null) return View(existing, QueuePositions());
             var queued = _jobs.Values.Where(item => item.Job.Status == JobStatus.Queued).ToArray();
             if (queued.Length >= _settings.MaxQueued || queued.Count(item => item.Owner == owner) >= _settings.MaxQueuedPerKey)
                 throw new JobCapacityException();
@@ -93,7 +94,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
                 _jobs.Add(id, stored);
             }
             finally { if (Directory.Exists(pending)) Directory.Delete(pending, true); }
-            return View(stored);
+            return View(stored, QueuePositions());
         }
     }
 
@@ -102,14 +103,18 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
         lock (_sync)
         {
             Sweep();
-            return _jobs.TryGetValue(id, out var job) && job.Owner == owner ? View(job) : null;
+            return _jobs.TryGetValue(id, out var job) && job.Owner == owner ? View(job, QueuePositions()) : null;
         }
     }
 
-    private RenderJob View(StoredJob stored) => stored.Job with
+    // Positions come from one ordering per operation. Ranking each rendered job separately made a
+    // List over a large queue quadratic while holding the lock the scheduler also needs.
+    private Dictionary<string, int> QueuePositions() => Queued().Select((job, index) => (job.Job.Id, Position: index + 1))
+        .ToDictionary(pair => pair.Id, pair => pair.Position, StringComparer.Ordinal);
+
+    private static RenderJob View(StoredJob stored, IReadOnlyDictionary<string, int> positions) => stored.Job with
     {
-        QueuePosition = stored.Job.Status == JobStatus.Queued
-            ? Queued().Select((job, index) => (job, index)).First(pair => pair.job.Job.Id == stored.Job.Id).index + 1 : null
+        QueuePosition = stored.Job.Status == JobStatus.Queued ? positions[stored.Job.Id] : null
     };
 
     public RenderJobPage List(string owner, JobStatus? status, int limit, string? after)
@@ -127,7 +132,8 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
                 page = all.Skip(index + 1);
             }
             var selected = page.Where(item => status is null || item.Job.Status == status).Take(limit + 1).ToArray();
-            return new(selected.Take(limit).Select(View).ToArray(), selected.Length > limit ? selected[limit - 1].Job.Id : null);
+            var positions = QueuePositions();
+            return new(selected.Take(limit).Select(item => View(item, positions)).ToArray(), selected.Length > limit ? selected[limit - 1].Job.Id : null);
         }
     }
 
@@ -242,15 +248,25 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
             foreach (var stored in _jobs.Values.ToArray())
             {
                 var id = stored.Job.Id;
-                if (stored.RemoveUtc <= Now && !_downloads.Contains(id))
+                // Sweeping runs inside every jobs operation. One job's files held open elsewhere (a
+                // transient Windows sharing violation, a backup or scanner) must not fail them all:
+                // leave that job as it is for the next sweep and carry on with the others.
+                try
                 {
-                    Directory.Delete(Path.Combine(_root, id), true);
-                    _jobs.Remove(id);
-                    continue;
+                    if (stored.RemoveUtc <= Now && !_downloads.Contains(id))
+                    {
+                        DeleteJobDirectory(id);
+                        _jobs.Remove(id);
+                    }
+                    else if (stored.Job.Status != JobStatus.Rendering && stored.Job.Status != JobStatus.Expired && stored.Job.ExpiresUtc <= Now)
+                        Expire(stored, stored.Job.Status == JobStatus.Queued ? "queue_expired" : "expired", "The job exceeded its configured retention or queue age.");
+                    else if (stored.RequestExpiresUtc <= Now) RemoveFile(id, "request.json");
                 }
-                if (stored.Job.Status != JobStatus.Rendering && stored.Job.Status != JobStatus.Expired && stored.Job.ExpiresUtc <= Now)
-                    Expire(stored, stored.Job.Status == JobStatus.Queued ? "queue_expired" : "expired", "The job exceeded its configured retention or queue age.");
-                else if (stored.RequestExpiresUtc <= Now) RemoveFile(id, "request.json");
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Metadata only: no exception message or storage path reaches the log.
+                    logger.LogWarning("Job {JobId} storage cleanup failed with {ExceptionType}; retrying on a later sweep", id, exception.GetType().Name);
+                }
             }
     }
 
@@ -260,6 +276,24 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
             Error = new(410, "Job expired", detail, code, false), ExpiresUtc = Now }, RemoveUtc = Now + _settings.ResultRetention });
         RemoveFile(stored.Job.Id, "request.json");
         if (!_downloads.Contains(stored.Job.Id)) RemoveFile(stored.Job.Id, "result.pdf");
+    }
+
+    private void DeleteJobDirectory(string id)
+    {
+        // Metadata goes last. If removal stops partway, the surviving job.json still describes an
+        // expired tombstone, so a restart recovers and retries it rather than finding a job directory
+        // without metadata, which Initialize rejects as corrupt storage.
+        var directory = Path.Combine(_root, id);
+        if (!Directory.Exists(directory)) return; // Already removed, for example by an earlier partial attempt.
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            if (Path.GetFileName(entry) == "job.json") continue;
+            // Recursive deletion removes links themselves and never follows them.
+            if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true);
+            else File.Delete(entry);
+        }
+        File.Delete(Path.Combine(directory, "job.json"));
+        Directory.Delete(directory, recursive: false);
     }
 
     private long Length(string id, string name) => File.Exists(FilePath(id, name)) ? new FileInfo(FilePath(id, name)).Length : 0;

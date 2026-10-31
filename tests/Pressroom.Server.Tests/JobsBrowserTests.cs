@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Diagnostics;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Pressroom.Client;
 using Pressroom.Contracts;
 using Xunit;
@@ -113,11 +112,7 @@ public sealed class JobsBrowserTests
     };
     private sealed class BrowserApplication(string config) : WebApplicationFactory<Program>
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-            => builder.ConfigureAppConfiguration((_, configuration) =>
-            {
-                configuration.Sources.Clear();
-                configuration.AddJsonFile(config);
-            });
+        // Select the file before the entry point builds configuration; see TestHost.
+        protected override IHost CreateHost(IHostBuilder builder) => base.CreateHost(TestHost.SelectConfigurationFile(builder, config));
     }
 }

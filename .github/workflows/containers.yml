@@ -53,7 +53,8 @@ jobs:
           foreach ($part in $env:RELEASE_VERSION.Split('-')[0].Split('.')) {
             if ([long]$part -gt 65534) { throw 'Version components must be at most 65534.' }
           }
-          $playwright = ./build/Resolve-PlaywrightVersion.ps1
+          # Container images float to the newest stable Playwright on purpose; installers stay pinned.
+          $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version latest
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
           "image=ghcr.io/$($env:GITHUB_REPOSITORY.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "Selected Playwright $playwright for this run; the matching driver and Chromium must pass verification." >> $env:GITHUB_STEP_SUMMARY

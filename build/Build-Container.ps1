@@ -1,5 +1,7 @@
 #requires -Version 7.0
-param([string]$Version = '0.1.0', [string]$Image = 'pressroom:local', [string]$PlaywrightVersion = 'latest', [switch]$TestNetworkIsolation)
+# -PlaywrightVersion defaults to the repository's pinned version and its lock files, so the payload is
+# reproducible from the commit. Pass 'latest' (or a version) explicitly to float inside the builder.
+param([string]$Version = '0.1.0', [string]$Image = 'pressroom:local', [string]$PlaywrightVersion = 'pinned', [switch]$TestNetworkIsolation)
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsLinux()) { throw 'Run on a Linux Docker host; Linux permissions are part of the check.' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -21,7 +23,8 @@ if ($manifest.buildMachineCheck.status -ne 'passed' -or !$manifest.buildMachineC
 & docker buildx build --pull --load --target runtime --metadata-file (Join-Path $root 'artifacts/container-image.json') -t $Image $root
 if ($LASTEXITCODE -ne 0) { throw 'Runtime image failed.' }
 $checkConfig = Join-Path $root 'deploy/check.settings.json'
-& docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges `
+# --init matches the documented runtime: a reaping init is PID 1, not the service.
+& docker run --rm --init --network none --read-only --cap-drop ALL --security-opt no-new-privileges `
     --tmpfs /var/lib/pressroom:rw,nosuid,noexec,size=512m,uid=10001,gid=10001,mode=0700 `
     --tmpfs /tmp:rw,nosuid,noexec,size=256m --shm-size=1g --stop-timeout 45 --security-opt "seccomp=$profile" `
     --mount "type=bind,source=$checkConfig,target=/etc/pressroom/pressroom.settings.json,readonly" $Image --check --config /etc/pressroom/pressroom.settings.json
