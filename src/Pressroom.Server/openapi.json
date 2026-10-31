@@ -3,7 +3,7 @@
   "info": {
     "title": "Pressroom",
     "version": "v1",
-    "description": "Synchronous rendering of self-contained HTML to PDF. All resources must be inline or data URLs. The complete JSON body is limited to 25 MiB by default. Opt-in durable jobs provide owner-scoped polling, downloads and cancellation. Anonymous jobs share an owner. Printing is Windows-only."
+    "description": "Synchronous rendering of self-contained HTML to PDF. All resources must be inline or data URLs. The complete JSON body is limited to 25 MiB by default. Opt-in durable jobs provide owner-scoped polling, downloads and cancellation. Anonymous jobs share an owner. Printing uses SumatraPDF on Windows or CUPS on Linux."
   },
   "security": [
     {
@@ -56,7 +56,7 @@
             }
           },
           "202": {
-            "description": "Submitted to the configured Windows printer; physical completion is not tracked.",
+            "description": "Submitted to the configured printer; physical completion is not tracked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -144,7 +144,7 @@
             }
           },
           "502": {
-            "description": "Print helper reported failure. Check the Windows queue before retrying; partial printing is possible.",
+            "description": "Print helper reported failure. Check the print queue before retrying; partial printing is possible.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -282,7 +282,7 @@
         "description": "Always requires a valid API key, including in anonymous mode. Lists configuration, not live printer availability.",
         "responses": {
           "200": {
-            "description": "Configured identifiers only; Windows printer names and executable paths are not exposed.",
+            "description": "Configured identifiers only; OS printer names and executable paths are not exposed.",
             "content": {
               "application/json": {
                 "schema": {

@@ -20,6 +20,31 @@ public sealed class JobHttpTests
     private static RenderRequest Request(string text = "Hello") => new() { Html = $"<p>{text}</p>" };
 
     [Fact]
+    public async Task PrintingJobsRequireAKeyAndReturnAReceiptWithoutAPdf()
+    {
+        using var app = new TestApplication(authMode: AuthMode.Anonymous, jobsEnabled: true);
+        using var anonymous = app.CreateClient();
+        var request = Request() with { Printer = "office" };
+        using var rejected = await anonymous.PostAsJsonAsync("/v1/jobs", request, JsonDefaults.Options, Token);
+        Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+        Assert.Equal(0, app.Renderer.Calls);
+        Assert.Equal(0, app.Printing.Calls);
+        using var http = app.CreateAuthenticatedClient();
+        using var unknown = await http.PostAsJsonAsync("/v1/jobs", request with { Printer = "unknown" }, JsonDefaults.Options, Token);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal(0, app.Printing.Calls);
+        var client = new PressroomClient(http);
+        var job = await client.SubmitAsync(request, cancellationToken: Token);
+        var completed = await client.WaitAsync(job.Id, Token, TimeSpan.FromSeconds(10));
+        Assert.Equal(JobStatus.Succeeded, completed.Status);
+        Assert.Equal(new PrintJobResult("test-job", "office", "submitted", 1), completed.PrintJob);
+        Assert.Equal(1, app.Printing.Calls);
+        Assert.Equal(FakeRenderer.Output.Pdf, app.Printing.LastDocument!.Pdf);
+        using var download = await http.GetAsync($"/v1/jobs/{job.Id}/result", Token);
+        Assert.Equal(HttpStatusCode.Conflict, download.StatusCode);
+    }
+
+    [Fact]
     public async Task JobsAreDisabledByDefault()
     {
         using var app = new TestApplication();

@@ -58,7 +58,8 @@ renders remain usable.
 - Synchronous PDF-only requests do not deliberately store input HTML or output PDFs. Renders
   write no PDF file; the page count is read from the in-memory document.
 - Printer requests write the PDF to a private job directory under
-  `<StateRoot>\temp` for SumatraPDF and remove it after submission. The Windows
+  `<StateRoot>/temp` for SumatraPDF or CUPS and remove it after submission. Linux
+  print directories use mode 0700. The OS
   spooler may retain data independently.
 - Logs are metadata only: identifiers, sizes, timings, page counts, outcomes, and
   blocked-resource counts. They never include document bodies, PDF bytes, secrets,
@@ -74,7 +75,7 @@ retention. Linux uses 0700 directories/0600 files; Windows uses a protected
 service-SID DACL. Use volume encryption for encryption at rest. Successful jobs
 remove HTML; failed input and results follow [retention settings](configuration.md).
 Storage is locked to one instance. With persistent storage, queued jobs survive restart; active jobs become
-failed/interrupted. Interrupted printing may have reached the Windows spooler.
+failed/interrupted. Interrupted printing may have reached the OS spooler.
 
 Owners are API key identifiers. Rotating a secret under the same identifier keeps
 access; reusing an identifier grants access to its prior jobs. Other keys get 404

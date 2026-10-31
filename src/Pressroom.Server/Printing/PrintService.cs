@@ -38,7 +38,7 @@ public sealed class PrintService : IPrintService
 
     public async Task<PrintJobResult> PrintAsync(string printer, RenderOutput document, CancellationToken cancellationToken)
     {
-        // Resolve only from configuration. A request must never supply a Windows queue name or command.
+        // Resolve only from configuration. A request must never supply a queue name or command.
         var identifier = Printers.FirstOrDefault(id => id.Equals(printer, StringComparison.OrdinalIgnoreCase))
             ?? throw new ArgumentException("The printer is not configured.", nameof(printer));
         var jobId = Guid.NewGuid().ToString("N");
@@ -48,9 +48,12 @@ public sealed class PrintService : IPrintService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(profile);
+            if (OperatingSystem.IsLinux())
+                Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            else
+                Directory.CreateDirectory(profile);
             await File.WriteAllBytesAsync(file, document.Pdf, cancellationToken);
-            var start = new ProcessStartInfo(_settings.SumatraPdfPath)
+            var start = new ProcessStartInfo(OperatingSystem.IsLinux() ? _settings.CupsCommandPath : _settings.SumatraPdfPath)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -60,9 +63,14 @@ public sealed class PrintService : IPrintService
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            // A private profile avoids shared settings, remembered documents, and existing UI instances.
-            foreach (var argument in new[] { "-appdata", profile, "-silent", "-print-to", _settings.Printers[identifier], file })
-                start.ArgumentList.Add(argument);
+            if (OperatingSystem.IsLinux())
+                CupsPrintCommand.AddArguments(start, _settings.Printers[identifier], file);
+            else
+            {
+                // A private profile avoids shared settings, remembered documents, and existing UI instances.
+                foreach (var argument in new[] { "-appdata", profile, "-silent", "-print-to", _settings.Printers[identifier], file })
+                    start.ArgumentList.Add(argument);
+            }
             var exitCode = await _runner.RunAsync(start, cancellationToken);
             if (exitCode != 0)
             {
@@ -105,7 +113,8 @@ public sealed class PrintProcessRunner : IPrintProcessRunner
 {
     public async Task<int> RunAsync(ProcessStartInfo start, CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsWindows() || !File.Exists(start.FileName)) throw new PrintUnavailableException();
+        if ((!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) || !File.Exists(start.FileName))
+            throw new PrintUnavailableException();
         cancellationToken.ThrowIfCancellationRequested();
         using var process = new Process { StartInfo = start };
         try

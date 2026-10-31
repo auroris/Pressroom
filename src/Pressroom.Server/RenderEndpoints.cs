@@ -73,11 +73,6 @@ public static class RenderEndpoints
 
         app.MapGet("/v1/printers", async (HttpContext context, IPrintService printing) =>
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                await Results.Json(new { printers = Array.Empty<string>() }).ExecuteAsync(context);
-                return;
-            }
             if (!(await context.AuthenticateAsync(AuthenticationNames.ApiKey)).Succeeded)
             {
                 await context.ChallengeAsync(AuthenticationNames.ApiKey);
@@ -143,11 +138,6 @@ public static class RenderEndpoints
             }
 
             var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
-            if (request.Printer is not null && !OperatingSystem.IsWindows())
-            {
-                await Problems.WriteAsync(context, 400, "Printing unavailable", "Printing is available on Windows only.");
-                return;
-            }
             if (request.Printer is not null && !authentication.Succeeded)
             {
                 await context.ChallengeAsync(AuthenticationNames.ApiKey);
@@ -249,12 +239,12 @@ public static class RenderEndpoints
         catch (PrintUnavailableException)
         {
             await Problems.WriteAsync(context, 503, "Printing unavailable",
-                "Check the Windows host, Printing:SumatraPdfPath, and the service identity's access to the executable and temporary directory.");
+                "Check the print helper configuration (Printing:SumatraPdfPath on Windows or Printing:CupsCommandPath on Linux) and the service identity's access to the executable and temporary directory.");
         }
         catch (PrintSubmissionException)
         {
             await Problems.WriteAsync(context, 502, "Print submission failed",
-                "The print helper reported a failure. Check the configured printer and its permissions. The job may have partially printed; check the Windows queue before retrying.");
+                "The print helper reported a failure. Check the configured printer and its permissions. The job may have partially printed; check the print queue before retrying.");
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -267,7 +257,7 @@ public static class RenderEndpoints
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             await Problems.WriteAsync(context, 504, printingStarted ? "Print deadline expired" : "Render deadline expired",
-                printingStarted ? "Print submission exceeded the processing timeout. A job may already be in the Windows queue; check it before retrying."
+                printingStarted ? "Print submission exceeded the processing timeout. A job may already be in the print queue; check it before retrying."
                     : "The request exceeded its overall processing timeout.");
         }
         catch

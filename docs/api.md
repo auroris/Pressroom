@@ -18,8 +18,8 @@ an owner and can list/read each other's jobs; use API-key mode for private work.
 IDs contain 128 random bits, represented as 32 lowercase hex characters. Submission
 accepts one Idempotency-Key of 1–128 visible ASCII characters. Same owner/key
 returns the existing job (including terminal/tombstone state) during retention;
-the first body wins. Use a new key for distinct work. Windows print jobs require
-an API key; Linux printer requests return 400.
+the first body wins. Use a new key for distinct work. Print jobs on both Windows
+and Linux require an API key and a configured printer identifier.
 
 A job has id, status (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`,
 `expired`), createdUtc, optional startedUtc/completedUtc, expiresUtc, fileName,

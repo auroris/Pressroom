@@ -96,13 +96,13 @@ public sealed class JobScheduler(IJobStore store, RenderCoordinator renderer, IP
         catch (OperationCanceledException)
         {
             store.Fail(id, stoppingToken.IsCancellationRequested
-                ? new(503, "Render interrupted", printingStarted ? "Check the Windows print queue before resubmitting." : "The service stopped during rendering.", "interrupted", !printingStarted)
-                : new(504, "Render deadline expired", printingStarted ? "Check the Windows print queue before resubmitting." : "The render exceeded its processing timeout.", "deadline", !printingStarted));
+                ? new(503, "Render interrupted", printingStarted ? "Check the print queue before resubmitting." : "The service stopped during rendering.", "interrupted", !printingStarted)
+                : new(504, "Render deadline expired", printingStarted ? "Check the print queue before resubmitting." : "The render exceeded its processing timeout.", "deadline", !printingStarted));
         }
         catch (RenderUnavailableException) { store.Fail(id, new(503, "Renderer unavailable", "The rendering browser restarted or stopped.", "renderer_unavailable", true)); }
         catch (RenderDocumentException) { store.Fail(id, new(422, "Document could not be rendered", "A readiness condition or document operation failed.", "document", false)); }
         catch (PrintUnavailableException) { store.Fail(id, new(503, "Printing unavailable", "Check the printer configuration and service identity.", "printing_unavailable", true)); }
-        catch (PrintSubmissionException) { store.Fail(id, new(502, "Print submission failed", "Check the Windows queue before resubmitting; pages may already have printed.", "print_submission", false)); }
+        catch (PrintSubmissionException) { store.Fail(id, new(502, "Print submission failed", "Check the print queue before resubmitting; pages may already have printed.", "print_submission", false)); }
         catch (Exception exception)
         {
             logger.LogError("Job {JobId} failed with {ExceptionType}", id, exception.GetType().Name);

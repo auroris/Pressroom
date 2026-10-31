@@ -128,13 +128,13 @@ public sealed class ConfigurationTests : IDisposable
         });
         WriteJson("selected.json", new
         {
-            Printing = new { Printers = new Dictionary<string, string> { ["office"] = "Office Printer", ["pdf-test"] = "Microsoft Print to PDF" } }
+            Printing = new { CupsCommandPath = "/usr/bin/lpr", Printers = new Dictionary<string, string> { ["office"] = "Office Printer", ["pdf-test"] = "Microsoft Print to PDF" } }
         });
         using var configuration = new ConfigurationManager();
         ApplicationConfiguration.Configure(configuration, _directory, "selected.json");
         var printing = configuration.GetSection("Printing").Get<PrintingSettings>()!;
-        if (OperatingSystem.IsWindows()) printing.Validate();
-        else Assert.Throws<InvalidOperationException>(() => printing.Validate());
+        printing.Validate();
+        Assert.Equal("/usr/bin/lpr", printing.CupsCommandPath);
         Assert.Equal("Office Printer", printing.Printers["office"]);
         Assert.Equal("Microsoft Print to PDF", printing.Printers["pdf-test"]);
         Assert.Equal(Path.Combine(_directory, "SumatraPDF.exe"), printing.SumatraPdfPath);

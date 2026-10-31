@@ -24,7 +24,7 @@ await File.WriteAllBytesAsync(pdf.FileName, pdf.Bytes);
 
 Reuse a caller-owned HttpClient (or register a typed client with AddHttpClient).
 RenderStreamAsync returns a disposable PdfRenderResult for streaming; PrintAsync
-submits to a configured Windows printer. Errors include HTTP status, problem
+submits to a configured Windows or Linux printer. Errors include HTTP status, problem
 details, and Retry-After. Retry policy belongs to the caller.
 
 With jobs enabled on the server, SubmitAsync/GetJobAsync/WaitAsync manage durable

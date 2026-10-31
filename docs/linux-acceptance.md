@@ -19,7 +19,7 @@ with 15 Windows-specific skips, both directly and in the unprivileged builder.
 | Clean Ubuntu 24.04 and Debian 13 direct-install VMs | Separate host qualification | Not run |
 | Access | Health 200, valid key, bad/missing key 401, explicit anonymous mode | Passed both |
 | Bilingual output | Two pages, Noto fonts, extracted text and rendered pages checked | Passed both |
-| Printing | Empty discovery, request 400, nonempty printing settings rejected | Passed both |
+| Printing (before CUPS support) | Empty discovery, request 400, nonempty printing settings rejected | Passed both; superseded by the host checks below |
 | Limits | 413, 429/Retry-After, healthy during saturation, cancellation cleanup | Passed both |
 | Shutdown | Two active renders; no owned live child processes | Direct 0.206 s; container 0.427 s |
 | Startup | Lifecycle restart to ready | Direct 1.903 s; container 2.366 s |
@@ -28,6 +28,33 @@ with 15 Windows-specific skips, both directly and in the unprivileged builder.
 | Restarted jobs | 100 queued plus one active | Direct recovered 100 and marked active interrupted; container forgot all temporary jobs |
 | Updates | Two versions/images and rollback, same external configuration | Direct retained job PDF; container discarded jobs as required |
 | Optional isolation | Host/peer/internet/DNS/UDP with reachable positive controls | Container passed iptables/ip6tables rules |
+
+## Linux host printing follow-up
+
+On **2026-10-31**, the CUPS backend was tested on the same Ubuntu VM with the
+service running as an unprivileged user. A temporary CUPS queue targeted
+`ippeveprinter` on loopback; no physical printer was used. The queue and virtual
+printer process were removed after testing. The existing Pressroom service and
+its configuration were unchanged.
+
+- `/usr/bin/lp` and `/usr/bin/lpr` each submitted one synchronous render and one
+  asynchronous job through the real server and Chromium renderer.
+- All four CUPS jobs completed and the virtual printer retained four valid PDFs.
+  The render API returned 202 submission receipts; background jobs succeeded
+  with `printJob` receipts and returned 409 for PDF downloads.
+- Anonymous printing and printer discovery returned 401. Authenticated discovery
+  exposed only the configured identifier. Temporary `print-*` directories were
+  removed after submission.
+- The Linux server suite passed 127 tests, with two skips (Windows virtual-printer
+  behavior and the separate browser load test). The Windows server suite passed
+  114 tests, with 15 Linux/browser skips. Coverage includes helper arguments,
+  nonzero exits, missing/nonexecutable helpers, cancellation, private Linux
+  directories, configuration, authentication, and background printing.
+
+The API tests ran in a private mount namespace hiding `/etc/pressroom`, so they
+could use test configuration without reading or changing the installed service's
+protected settings. These results qualify submission to a virtual CUPS printer;
+physical device output still requires target-printer qualification.
 
 ## Load measurements
 

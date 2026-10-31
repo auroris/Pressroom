@@ -26,9 +26,9 @@ validation remain enabled. See [the VM acceptance record](linux-acceptance.md).
   network policy or open raw sockets.
 - JSON configuration and API keys live outside the container and are mounted
   read-only. The Docker daemon is never mounted into the container.
-- Printing is unavailable in the Linux image. Linux can print through CUPS, but
-  Pressroom does not implement an `lp` backend. A separate worker can download
-  PDFs and submit them to a printer without granting this container printer access.
+- The Linux image does not include CUPS client tools or printer configuration.
+  [Linux printing](printing.md) is intended for a direct host installation;
+  Pressroom does not detect or block printing in containers.
 
 Jobs and results disappear when this container stops, restarts, or is replaced.
 Download results before replacing it; clients must resubmit lost work. The direct

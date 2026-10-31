@@ -8,7 +8,8 @@ traffic. An unprivileged identity does not itself block outbound connections;
 host egress restrictions are a separate optional deployment setting.
 
 Pressroom supports Linux x64 with the .NET 10 ASP.NET Core runtime and Chromium's
-sandbox enabled. Printing is Windows-only. Record target-host qualification in
+sandbox enabled. Optional [printing](printing.md) uses CUPS `lp` or `lpr` and an
+explicit printer allowlist. Record target-host qualification in
 [Linux acceptance](linux-acceptance.md).
 
 ## Prerequisites

@@ -13,7 +13,7 @@ public sealed record RenderRequest
     public RenderOptions? Options { get; init; } = new();
 }
 
-/// <summary>Submission receipt, not confirmation of physical printing or a Windows spooler job ID.</summary>
+/// <summary>Submission receipt, not confirmation of physical printing or a spooler job ID.</summary>
 public sealed record PrintJobResult(string JobId, string Printer, string Status, int PageCount);
 
 [JsonConverter(typeof(PdfDispositionJsonConverter))]

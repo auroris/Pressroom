@@ -79,10 +79,10 @@ public static class JobEndpoints
             var request = JsonSerializer.Deserialize<RenderRequest>(body.GetBuffer().AsSpan(0, checked((int)body.Length)), JsonDefaults.Options);
             if (request is null) { await Problems.WriteAsync(context, 400, "A request object is required"); return; }
             var authentication = await context.AuthenticateAsync(AuthenticationNames.ApiKey);
-            if (request.Printer is not null)
+            if (request.Printer is not null && !authentication.Succeeded)
             {
-                if (!OperatingSystem.IsWindows()) { await Problems.WriteAsync(context, 400, "Printing unavailable", "Printing is available on Windows only."); return; }
-                if (!authentication.Succeeded) { await context.ChallengeAsync(AuthenticationNames.ApiKey); return; }
+                await context.ChallengeAsync(AuthenticationNames.ApiKey);
+                return;
             }
             if (request.Options is { } options)
                 request = request with { Options = options with

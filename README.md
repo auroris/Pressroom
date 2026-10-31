@@ -3,7 +3,7 @@
 <p align="center">
   HTML in, PDF out. An HTML-to-PDF service for Windows, IIS, Linux, and containers.<br>
   An application <code>POST</code>s one complete HTML document; Pressroom returns print-quality PDF bytes,
-  or sends the pages straight to an allowlisted Windows printer.
+  or sends the pages straight to an allowlisted Windows or Linux printer.
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
   <img alt=".NET 10" src="docs/images/badge-dotnet.svg">
   <img alt="Windows and IIS supported" src="docs/images/badge-windows.svg">
   <img alt="Renderer: Chromium headless shell" src="docs/images/badge-renderer.svg">
-  <img alt="Output: PDF or Windows printer" src="docs/images/badge-output.svg">
+  <img alt="Output: PDF or printer" src="docs/images/badge-output.svg">
   <img alt="Client: .NET, HTTP-only" src="docs/images/badge-client.svg">
   <a href="docs/container.md"><img alt="Containers: Linux and Windows x64" src="https://img.shields.io/badge/containers-linux%20%7C%20windows--x64-245c78"></a>
   <a href="https://github.com/auroris/Pressroom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/auroris/Pressroom?label=release&color=2ea44f"></a>
@@ -43,8 +43,8 @@ Chrome, no font installation, no downloads at run time.
   resources load, network and file access are blocked before parsing, scripts are
   off unless the caller's key opts in, and every render gets a fresh sandboxed
   browser context.
-- **Print to Windows printers.** Add a `printer` identifier and Pressroom hands the
-  pages to an allowlisted queue through SumatraPDF, returning a submission receipt.
+- **Print on Windows or Linux.** Add a `printer` identifier and Pressroom hands the
+  pages to an allowlisted queue through SumatraPDF or CUPS, returning a submission receipt.
 - **Simple access control.** Named API keys with per-key JavaScript permission, or
   explicit anonymous mode for a trusted network. Health stays anonymous for IIS
   warm-up and probes.
@@ -146,7 +146,7 @@ the [Deployment guide](docs/deployment.md) covers the production IIS setup.
 | [API reference](docs/api.md) | Every endpoint, request option with its rules and defaults, response headers, status codes, deadlines, and capacity. |
 | [.NET client](docs/client.md) | `PressroomClient`: buffered and streaming renders, returning PDFs to browsers, printing, errors, retries, and fallback. |
 | [Configuration](docs/configuration.md) | The external settings file, access modes and API keys, JavaScript permission, limits, paths, logging, and upgrade notes. |
-| [Printing](docs/printing.md) | SumatraPDF setup, the printer allowlist, submission receipts, error semantics, and local testing. |
+| [Printing](docs/printing.md) | Windows/SumatraPDF and Linux/CUPS setup, the printer allowlist, receipts, and local testing. |
 | [Deployment](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
 | [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, tarball packaging and rollback. |
 | [Containers](docs/container.md) | Sandboxed non-root image, Compose, Kubernetes, volumes, health and image verification. |

@@ -51,7 +51,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
                 _nextSequence = Math.Max(_nextSequence, stored.Sequence);
                 if (stored.Job.Status == JobStatus.Rendering)
                     Fail(id, new(503, "Render interrupted", stored.Job.Printer is null ? "The service stopped during this job."
-                        : "The service stopped during a print job. Check the Windows queue before resubmitting.", "interrupted", stored.Job.Printer is null));
+                        : "The service stopped during a print job. Check the print queue before resubmitting.", "interrupted", stored.Job.Printer is null));
                 else if (stored.Job.Status == JobStatus.Queued && !File.Exists(FilePath(id, "request.json")))
                     throw new InvalidOperationException("An acknowledged queued job has no stored request.");
                 else if (stored.Job.Status == JobStatus.Succeeded)

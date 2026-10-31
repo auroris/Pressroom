@@ -175,6 +175,6 @@ fallback strategies.
 | Write HTML that paginates well and uses the packaged fonts | [Authoring documents](documents.md) |
 | See every request option, response header, and status code | [API reference](api.md) |
 | Configure keys, JavaScript permission, limits, and paths | [Configuration](configuration.md) |
-| Send output to a Windows printer | [Printing](printing.md) |
+| Send output to a Windows or Linux printer | [Printing](printing.md) |
 | Put it on an IIS server and keep it updated | [Deployment](deployment.md) |
 | Understand what the sandbox does and does not guarantee | [Security model](security.md) |

@@ -66,10 +66,9 @@ explicitly:
 
 Anonymous mode admits rendering, service information, and the OpenAPI document
 without a key. A supplied invalid key still returns 401. Anonymous renders always
-have JavaScript disabled, and anonymous callers cannot print or list Windows printers; a
+have JavaScript disabled, and anonymous callers cannot print or list printers; a
 caller in anonymous mode may still present a valid configured key to use those
-permissions. Linux printer discovery returns an empty list under the configured
-authentication mode.
+permissions. Printer discovery requires a valid key on both Windows and Linux.
 
 Windows authentication and domain group checks are not supported. Under IIS,
 enable Anonymous Authentication and disable Windows Authentication; Pressroom
@@ -137,8 +136,12 @@ URLs, or page console text. Arbitrary Serilog sink settings are not loaded.
 ```
 
 `Printers` maps caller-facing identifiers (1–128 ASCII letters, digits, hyphens,
-and underscores, matched ignoring case) to exact Windows printer names. No printer
-is enabled by default. See the [Printing guide](printing.md) for the full setup.
+and underscores, matched ignoring case) to exact Windows printer names or Linux
+CUPS destinations. No printer is enabled by default. Windows requires
+`SumatraPdfPath`; Linux uses `CupsCommandPath`, default `/usr/bin/lp`, which can
+also be an absolute path to CUPS `lpr` (for example `/usr/bin/lpr`). The helper
+setting for the other OS is ignored. See the [Printing guide](printing.md) for
+host setup and a Linux configuration example.
 
 ## Asynchronous jobs
 

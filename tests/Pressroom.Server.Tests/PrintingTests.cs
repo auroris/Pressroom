@@ -14,7 +14,7 @@ namespace Pressroom.Server.Tests;
 
 public sealed class PrintingTests
 {
-    [WindowsTheory]
+    [Theory]
     [InlineData(AuthMode.ApiKey)]
     [InlineData(AuthMode.Anonymous)]
     public async Task ValidKeyPrintsAndReturnsReceiptInsteadOfPdf(AuthMode mode)
@@ -32,7 +32,7 @@ public sealed class PrintingTests
         Assert.False(app.Renderer.LastRequest!.Options!.JavaScript);
     }
 
-    [WindowsTheory]
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task AnonymousAndUnrelatedHostPrincipalsCannotPrintOrListPrinters(bool hostPrincipal)
@@ -47,7 +47,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [WindowsTheory]
+    [Theory]
     [InlineData("")]
     [InlineData("wrong-secret")]
     [InlineData("duplicate")]
@@ -63,7 +63,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [WindowsTheory]
+    [Theory]
     [InlineData("unknown")]
     [InlineData("")]
     [InlineData(" ")]
@@ -82,7 +82,7 @@ public sealed class PrintingTests
         Assert.Equal(0, app.Printing.Calls);
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task PrinterDiscoveryRequiresKeyAndReturnsOnlyConfiguredIdentifiers()
     {
         using var app = new TestApplication(authMode: AuthMode.Anonymous);
@@ -92,7 +92,7 @@ public sealed class PrintingTests
         Assert.Equal("{\"printers\":[\"office\"]}", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task AnonymousOpenApiRetainsExplicitPrinterAuthenticationAndDocumentsReceipt()
     {
         using var app = new TestApplication(authMode: AuthMode.Anonymous);
@@ -106,7 +106,7 @@ public sealed class PrintingTests
         Assert.True(root.GetProperty("components").GetProperty("schemas").GetProperty("RenderRequest").GetProperty("properties").TryGetProperty("printer", out _));
     }
 
-    [WindowsTheory]
+    [Theory]
     [InlineData(false, HttpStatusCode.BadGateway)]
     [InlineData(true, HttpStatusCode.ServiceUnavailable)]
     public async Task PrintFailuresReturnProblemDetails(bool unavailable, HttpStatusCode status)
@@ -120,7 +120,7 @@ public sealed class PrintingTests
         Assert.Null(response.Content.Headers.ContentDisposition);
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task PrintUsesDeadlineAndKeepsAdmissionSlotUntilItStops()
     {
         using var app = new TestApplication();
@@ -138,13 +138,13 @@ public sealed class PrintingTests
         Assert.Equal(HttpStatusCode.TooManyRequests, second.StatusCode);
         using var timedOut = await first;
         Assert.Equal(HttpStatusCode.GatewayTimeout, timedOut.StatusCode);
-        Assert.Contains("Windows queue", await timedOut.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("print queue", await timedOut.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         app.Printing.Callback = null;
         using var next = await client.PostAsJsonAsync("/v1/render", Request(), JsonDefaults.Options, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Accepted, next.StatusCode);
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task RenderFailureDoesNotStartPrintingAndPdfRequestsDoNotPrint()
     {
         using var app = new TestApplication();
@@ -181,7 +181,7 @@ public sealed class PrintServiceTests : IDisposable
 {
     private readonly string _stateRoot = Path.Combine(Path.GetTempPath(), "pressroom-print-tests", Guid.NewGuid().ToString("N"));
 
-    [WindowsTheory]
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     public async Task HelperGetsExactConfiguredPrinterAndPrivatePdfThenCleansUp(int exitCode)
@@ -191,8 +191,18 @@ public sealed class PrintServiceTests : IDisposable
             Assert.False(start.UseShellExecute);
             Assert.Equal(ProcessWindowStyle.Hidden, start.WindowStyle);
             Assert.Equal(_stateRoot, start.WorkingDirectory);
-            Assert.Equal(new[] { "-appdata", Path.Combine(Path.GetDirectoryName(start.ArgumentList[5])!, "profile"), "-silent", "-print-to", "Office \"Printer\" -argument" }, start.ArgumentList.Take(5));
-            Assert.Equal(FakeRenderer.Output.Pdf, await File.ReadAllBytesAsync(start.ArgumentList[5], cancellation));
+            var file = start.ArgumentList[^1];
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.Equal("/usr/bin/lp", start.FileName);
+                Assert.Equal(new[] { "-d", "Office \"Printer\" -argument", "--" }, start.ArgumentList.Take(3));
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                    File.GetUnixFileMode(Path.GetDirectoryName(file)!));
+                Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(file)!, "profile")));
+            }
+            else
+                Assert.Equal(new[] { "-appdata", Path.Combine(Path.GetDirectoryName(file)!, "profile"), "-silent", "-print-to", "Office \"Printer\" -argument" }, start.ArgumentList.Take(5));
+            Assert.Equal(FakeRenderer.Output.Pdf, await File.ReadAllBytesAsync(file, cancellation));
             return exitCode;
         });
         var service = Create(runner);
@@ -207,7 +217,7 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(_stateRoot, "temp")));
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task CancellationCleansUpAndUnknownPrintersNeverLaunchHelper()
     {
         var service = Create(new StubRunner((_, _) => throw new OperationCanceledException()));
@@ -217,7 +227,7 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(_stateRoot, "temp")));
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task MissingPrintHelperIsReportedAsUnavailable()
     {
         await Assert.ThrowsAsync<PrintUnavailableException>(() => new PrintProcessRunner().RunAsync(
@@ -240,21 +250,30 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Single(Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(savedOutput!)!));
     }
 
-    [WindowsFact]
+    [Fact]
     public async Task RunnerKillsTimedOutProcessBeforeReturning()
     {
-        if (!OperatingSystem.IsWindows()) return;
         Directory.CreateDirectory(_stateRoot);
         var pidFile = Path.Combine(_stateRoot, "helper.pid");
-        var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"))
+        var start = new ProcessStartInfo(OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
+            : "/bin/sh")
         {
             UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true, RedirectStandardError = true
         };
-        start.ArgumentList.Add("-NoProfile");
-        start.ArgumentList.Add("-NonInteractive");
-        start.ArgumentList.Add("-Command");
-        start.ArgumentList.Add("[IO.File]::WriteAllText($env:PRESSROOM_TEST_PID_FILE, [string]$PID); Start-Sleep -Seconds 60");
+        if (OperatingSystem.IsWindows())
+        {
+            start.ArgumentList.Add("-NoProfile");
+            start.ArgumentList.Add("-NonInteractive");
+            start.ArgumentList.Add("-Command");
+            start.ArgumentList.Add("[IO.File]::WriteAllText($env:PRESSROOM_TEST_PID_FILE, [string]$PID); Start-Sleep -Seconds 60");
+        }
+        else
+        {
+            start.ArgumentList.Add("-c");
+            start.ArgumentList.Add("echo $$ > \"$PRESSROOM_TEST_PID_FILE\"; exec sleep 60");
+        }
         start.Environment["PRESSROOM_TEST_PID_FILE"] = pidFile;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var running = new PrintProcessRunner().RunAsync(start, timeout.Token);
@@ -269,14 +288,22 @@ public sealed class PrintServiceTests : IDisposable
         Assert.Throws<ArgumentException>(() => Process.GetProcessById(pid));
     }
 
-    [WindowsFact]
+    [Fact]
     public void PrinterConfigurationRejectsInvalidMappingsAndMissingExecutableSetting()
     {
         new PrintingSettings().Validate();
         foreach (var id in new[] { "", "bad id", "a/b", new string('x', 129) })
             Assert.Throws<InvalidOperationException>(() => new PrintingSettings { Printers = new() { [id] = "Printer" } }.Validate());
         Assert.Throws<InvalidOperationException>(() => new PrintingSettings { Printers = null! }.Validate());
-        Assert.Throws<InvalidOperationException>(() => new PrintingSettings { Printers = new() { ["office"] = "Printer" } }.Validate());
+        if (OperatingSystem.IsWindows())
+            Assert.Throws<InvalidOperationException>(() => new PrintingSettings { Printers = new() { ["office"] = "Printer" } }.Validate());
+        else
+            new PrintingSettings { Printers = new() { ["office"] = "Printer" } }.Validate();
+        Assert.Throws<InvalidOperationException>(() => new PrintingSettings
+        {
+            Printers = new(StringComparer.Ordinal) { ["office"] = "Printer", ["OFFICE"] = "Printer" },
+            SumatraPdfPath = Path.Combine(_stateRoot, "SumatraPDF.exe")
+        }.Validate());
         foreach (var name in new[] { "", " ", "Printer\n", new string('x', 257) })
             Assert.Throws<InvalidOperationException>(() => new PrintingSettings { Printers = new() { ["office"] = name }, SumatraPdfPath = Path.Combine(_stateRoot, "SumatraPDF.exe") }.Validate());
     }
