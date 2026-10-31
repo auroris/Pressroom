@@ -54,7 +54,6 @@ RenderedPdf pdf = await pressroom.RenderAsync(new RenderRequest
 {
     Html = completeHtml,
     FileName = "orders-preview.pdf",
-    Disposition = PdfDisposition.Inline,
     Options = new RenderOptions
     {
         PageSize = PageSize.Named("A4"),
@@ -62,7 +61,7 @@ RenderedPdf pdf = await pressroom.RenderAsync(new RenderRequest
     }
 }, cancellationToken);
 
-// pdf.Bytes, pdf.FileName, pdf.PageCount, pdf.DurationMs, pdf.Disposition
+// pdf.Bytes, pdf.FileName, pdf.PageCount, pdf.DurationMs
 ```
 
 For large documents, stream instead. `RenderStreamAsync` returns a
@@ -83,19 +82,29 @@ an impossible margin is caught in your tests rather than on the wire.
 
 ## Returning the PDF to a browser
 
-A web application that proxies Pressroom's output must set its own response
-headers. Copying the bytes does not carry `Content-Disposition` through, so use the
-framework's typed file APIs and the disposition and file name the client returns:
+A web application chooses how to deliver the PDF using its own response headers.
+Pressroom returns bytes and a sanitized filename; it has no browser delivery
+setting. For a download, use the framework's file API:
 
 ```csharp
 // ASP.NET Core MVC
-Response.Headers.ContentDisposition = pdf.Disposition == PdfDisposition.Inline
-    ? $"inline; filename=\"{pdf.FileName}\""
-    : $"attachment; filename=\"{pdf.FileName}\"";
+return File(pdf.Bytes, "application/pdf", pdf.FileName);
+```
+
+For a preview, set a typed header in the application instead:
+
+```csharp
+// ASP.NET Core MVC
+var disposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("inline");
+disposition.SetHttpFileName(pdf.FileName);
+Response.GetTypedHeaders().ContentDisposition = disposition;
 return File(pdf.Bytes, "application/pdf");
 ```
 
-`FileName` is already sanitized by the client.
+The typed header handles Unicode filenames. Browser settings and PDF support
+determine whether the preview is displayed. If upgrading an existing caller,
+remove its Pressroom `Disposition` assignments and use an application-owned
+choice between these responses; see [API migration notes](api.md#upgrading-callers-that-use-disposition).
 
 ## Printing
 

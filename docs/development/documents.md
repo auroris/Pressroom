@@ -172,7 +172,7 @@ template for the techniques above: Noto Sans in all four styles, a `@page` rule,
 inline SVG, a table with `break-inside: avoid` rows, a `break-before: page`
 section, print and screen media rules, and English and French text. Its companion
 [`orders-bilingual.request.json`](../../samples/orders-bilingual.request.json) is
-ready to submit and requests inline display.
+ready to submit and returns PDF bytes to the calling application.
 
 ## Troubleshooting
 

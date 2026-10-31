@@ -43,7 +43,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "inline or attachment as requested, with a sanitized filename and UTF-8 filename*."
+                "description": "Always attachment, with a sanitized filename and UTF-8 filename*. The calling application controls its own browser response."
               }
             },
             "content": {
@@ -565,7 +565,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "inline or attachment as requested, with a sanitized filename and UTF-8 filename*."
+                "description": "Always attachment, with a sanitized filename and UTF-8 filename*. The calling application controls its own browser response."
               }
             },
             "content": {
@@ -822,22 +822,13 @@
           "options": {
             "$ref": "#/components/schemas/RenderOptions"
           },
-          "disposition": {
-            "type": "string",
-            "enum": [
-              "inline",
-              "attachment"
-            ],
-            "default": "attachment",
-            "description": "Controls the PDF Content-Disposition header: inline asks the browser to display the PDF; attachment asks it to download the file. The browser and caller application retain control of the final presentation."
-          },
           "printer": {
             "type": "string",
             "nullable": true,
             "minLength": 1,
             "maxLength": 128,
             "pattern": "^[A-Za-z0-9_-]+$",
-            "description": "Identifier from Printing:Printers (case-insensitive). Requires a valid API key in every access mode. Omit or use null for PDF output. fileName and disposition do not affect printing."
+            "description": "Identifier from Printing:Printers (case-insensitive). Requires a valid API key in every access mode. Omit or use null for PDF output. fileName does not affect printing."
           }
         }
       },
@@ -876,8 +867,7 @@
           "status",
           "createdUtc",
           "expiresUtc",
-          "fileName",
-          "disposition"
+          "fileName"
         ],
         "properties": {
           "id": {
@@ -929,13 +919,6 @@
           },
           "fileName": {
             "type": "string"
-          },
-          "disposition": {
-            "type": "string",
-            "enum": [
-              "inline",
-              "attachment"
-            ]
           },
           "printer": {
             "type": "string",

@@ -42,7 +42,6 @@ public sealed record RenderJob
     public int? PageCount { get; init; }
     public long? DurationMs { get; init; }
     public string FileName { get; init; } = "document.pdf";
-    public PdfDisposition Disposition { get; init; } = PdfDisposition.Attachment;
     public string? Printer { get; init; }
     public PrintJobResult? PrintJob { get; init; }
     public JobError? Error { get; init; }

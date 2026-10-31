@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -84,7 +85,7 @@ public sealed class JobHttpTests
         RenderJob job;
         try
         {
-            job = await client.SubmitAsync(Request(), "same", Token);
+            job = await client.SubmitAsync(Request() with { FileName = "rapport/été\r\n2026.pdf" }, "same", Token);
             Assert.Equal(JobStatus.Queued, job.Status);
             Assert.Equal(1, job.QueuePosition);
             Assert.Equal(job.Id, (await client.SubmitAsync(Request("changed"), "same", Token)).Id);
@@ -105,7 +106,15 @@ public sealed class JobHttpTests
         Assert.Equal(1, completed.PageCount);
         Assert.NotNull(completed.StartedUtc);
         Assert.NotNull(completed.CompletedUtc);
-        Assert.Equal(FakeRenderer.Output.Pdf, (await client.DownloadAsync(job.Id, Token)).Bytes);
+        using var jobJson = JsonDocument.Parse(await http.GetStringAsync($"v1/jobs/{job.Id}", Token));
+        Assert.False(jobJson.RootElement.TryGetProperty("disposition", out _));
+        using var response = await http.GetAsync($"v1/jobs/{job.Id}/result", Token);
+        Assert.Equal("application/pdf", response.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("attachment", response.Content.Headers.ContentDisposition!.DispositionType);
+        Assert.Equal("rapport_été__2026.pdf", response.Content.Headers.ContentDisposition.FileNameStar);
+        var pdf = await client.DownloadAsync(job.Id, Token);
+        Assert.Equal(FakeRenderer.Output.Pdf, pdf.Bytes);
+        Assert.Equal("rapport_été__2026.pdf", pdf.FileName);
         await client.CancelAsync(job.Id, Token);
         await client.CancelAsync(job.Id, Token);
         Assert.Equal(HttpStatusCode.Gone, (await Assert.ThrowsAsync<PressroomException>(() => client.DownloadAsync(job.Id, Token))).StatusCode);
@@ -177,6 +186,19 @@ public sealed class JobHttpTests
         Assert.Empty((await new PressroomClient(http).ListJobsAsync(cancellationToken: Token)).Items);
     }
 
+    [Theory]
+    [InlineData("inline")]
+    [InlineData("attachment")]
+    public async Task RemovedDispositionIsRejectedBeforeStorage(string disposition)
+    {
+        using var app = new TestApplication(jobsEnabled: true);
+        using var http = app.CreateAuthenticatedClient();
+        using var response = await http.PostAsJsonAsync("/v1/jobs", new { html = "<p>Hello</p>", disposition }, Token);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty((await new PressroomClient(http).ListJobsAsync(cancellationToken: Token)).Items);
+        Assert.Equal(0, app.Renderer.Calls);
+    }
+
     [Fact]
     public async Task BatchCompletesAndSurfacesDocumentErrorsWithoutRetrying()
     {
@@ -204,6 +226,47 @@ public sealed class JobStoreTests : IDisposable
     private LocalJobStore Store(ILogger<LocalJobStore>? logger = null) => new(Options.Create(_settings), Options.Create(new PathsSettings { StateRoot = _root }), _clock,
         logger ?? NullLogger<LocalJobStore>.Instance);
     private static RenderRequest Request(string text = "one") => new() { Html = text, Options = new() { TimeoutMs = 5000 } };
+
+    [Theory]
+    [InlineData("inline")]
+    [InlineData("attachment")]
+    public void RestartReadsLegacyDispositionWithoutExposingOrPersistingIt(string disposition)
+    {
+        string queued, completed;
+        using (var first = Store())
+        {
+            first.Initialize();
+            queued = first.Submit("key:a", Request(), "once").Id;
+            completed = first.Submit("key:a", Request(), null).Id;
+            first.Start(completed);
+            first.Succeed(completed, FakeRenderer.Output, 1, null);
+        }
+        foreach (var id in new[] { queued, completed })
+        {
+            var path = Path.Combine(_root, "jobs", id, "job.json");
+            var json = JsonNode.Parse(File.ReadAllText(path))!;
+            json["job"]!["disposition"] = disposition;
+            File.WriteAllText(path, json.ToJsonString());
+        }
+        var requestPath = Path.Combine(_root, "jobs", queued, "request.json");
+        var requestJson = JsonNode.Parse(File.ReadAllText(requestPath))!;
+        requestJson["disposition"] = disposition;
+        File.WriteAllText(requestPath, requestJson.ToJsonString());
+
+        using var restored = Store();
+        restored.Initialize();
+        Assert.Equal(Request(), restored.ReadRequest(queued));
+        Assert.Equal(queued, restored.Submit("key:a", Request(), "once").Id);
+        using var download = restored.OpenResult("key:a", completed);
+        Assert.NotNull(download);
+        using var bytes = new MemoryStream();
+        download.Stream.CopyTo(bytes);
+        Assert.Equal(FakeRenderer.Output.Pdf, bytes.ToArray());
+        restored.Start(queued);
+        restored.Succeed(queued, FakeRenderer.Output, 1, null);
+        Assert.DoesNotContain("\"disposition\"", File.ReadAllText(Path.Combine(_root, "jobs", queued, "job.json")));
+        Assert.DoesNotContain("\"disposition\"", JsonSerializer.Serialize(restored.Get("key:a", completed), JsonDefaults.Options));
+    }
 
     [Fact]
     public void RestartRecoversQueuedAndMarksInFlightInterrupted()

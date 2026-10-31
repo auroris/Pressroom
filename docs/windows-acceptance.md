@@ -37,12 +37,10 @@ directories. Keep normal Playwright validation and `ChromiumSandbox=true` enable
   graphic, bold and italic faces, French accents and ligatures, outlines, and
   requested tagging. Inspect the generated PDF visually and with your PDF
   inspection tool.
-- The sample requests `disposition: "inline"`. Verify that response's
-  `Content-Disposition`, repeat with `"attachment"`, and repeat with the property
-  omitted to check the attachment default. Confirm safe filenames in both modes.
-  If a server-side caller returns the PDF onward, check its browser response too:
-  it must carry the chosen mode, not just copy the PDF bytes. Invalid disposition
-  values must return 400. Browser PDF settings can affect inline display.
+- Verify `application/pdf` and a `Content-Disposition: attachment` header with a
+  safe filename, including a Unicode filename. The calling application sets its
+  own browser response headers to choose display or download. Requests containing
+  the removed `disposition` property must return 400.
 - Verify a caller-embedded image and font in addition to the packaged Noto Sans
   faces. Verify generic header and footer typography independently; page CSS and
   fonts do not automatically apply to Chromium's header and footer templates, and

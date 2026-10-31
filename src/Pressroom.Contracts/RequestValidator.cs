@@ -17,7 +17,6 @@ public static partial class RequestValidator
         void Error(string field, string message) => errors[field] = [message];
 
         if (string.IsNullOrWhiteSpace(request.Html)) Error("html", "A complete HTML document is required.");
-        if (!Enum.IsDefined(request.Disposition)) Error("disposition", "Disposition must be inline or attachment.");
         if (request.Printer is not null && !IsPrinterIdentifier(request.Printer))
             Error("printer", "Use a configured printer identifier of 1–128 ASCII letters, digits, hyphens, or underscores.");
         if (request.Options is not { } options)

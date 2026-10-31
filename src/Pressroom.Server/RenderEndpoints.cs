@@ -181,12 +181,8 @@ public static class RenderEndpoints
             deadline.CancelAfter(Timeout.InfiniteTimeSpan);
             context.Response.Headers["X-Render-Pages"] = output.PageCount.ToString(CultureInfo.InvariantCulture);
             context.Response.Headers["X-Render-Duration-Ms"] = processingMilliseconds.ToString(CultureInfo.InvariantCulture);
-            var disposition = new ContentDispositionHeaderValue(request.Disposition == PdfDisposition.Inline ? "inline" : "attachment");
-            // The framework emits an ASCII filename fallback plus RFC 5987 filename* for Unicode.
-            disposition.SetHttpFileName(RequestValidator.SanitizeFileName(request.FileName));
-            context.Response.GetTypedHeaders().ContentDisposition = disposition;
-            // A download filename here would make Results.File overwrite an inline disposition.
-            await Results.File(output.Pdf, "application/pdf", fileDownloadName: null,
+            // Carry the suggested filename to the calling application, which controls browser delivery.
+            await Results.File(output.Pdf, "application/pdf", fileDownloadName: RequestValidator.SanitizeFileName(request.FileName),
                 enableRangeProcessing: false).ExecuteAsync(context);
         }
         catch (BodyLimitExceededException)

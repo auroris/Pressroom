@@ -48,7 +48,6 @@ Request: UTF-8 `application/json` containing a complete document. Request compre
 {
   "html": "<!doctype html><html lang=\"en\">...</html>",
   "fileName": "orders-2026-10.pdf",
-  "disposition": "attachment",
   "options": {
     "pageSize": "Letter",
     "landscape": false,
@@ -73,7 +72,7 @@ Request: UTF-8 `application/json` containing a complete document. Request compre
 
 `html` is required. Omitted `fileName` becomes `document.pdf`; sanitize supplied names for `Content-Disposition` and use a framework response API rather than assembling the header manually. The sample filename is illustrative, not a fixed default.
 
-`disposition` accepts exactly `"inline"` or `"attachment"`; omission defaults to `"attachment"`. Inline requests browser display of the PDF, while attachment requests a download. Both modes return `application/pdf` and a sanitized suggested filename; the option selects the response disposition. Reject other values with 400. Browser settings and PDF support still determine the final inline behavior. [HTTP disposition semantics](https://www.rfc-editor.org/rfc/rfc6266.html#section-4.2).
+Pressroom returns `application/pdf` with a fixed `Content-Disposition: attachment` header carrying the sanitized suggested filename. The calling application chooses display or download when serving those bytes to its browser. There is no per-request browser delivery setting in Pressroom.
 
 `pageSize` accepts `Letter`, `Legal`, `Tabloid`, `A3`, `A4`, or `A5`, or an object such as `{ "width": "8.5in", "height": "11in" }`. `preferCssPageSize` allows CSS `@page` dimensions to take precedence. Validate dimensions, margins, scale, locale, time zone, timeout bounds, and unknown properties before opening a browser context.
 
@@ -89,7 +88,7 @@ The overall `timeoutMs` covers admitted request processing, queue waiting, docum
 
 | Status | Meaning | Body / headers |
 |---|---|---|
-| 200 | Rendered | `application/pdf`; requested inline/attachment `Content-Disposition` with sanitized filename; `X-Render-Pages`; `X-Render-Duration-Ms` |
+| 200 | Rendered | `application/pdf`; fixed `Content-Disposition: attachment` with sanitized filename; `X-Render-Pages`; `X-Render-Duration-Ms` |
 | 400 | Invalid JSON, required field, option, unit, or unsupported combination | `application/problem+json` with field information |
 | 401 / 403 | Authentication or authorization failure | Application problem details |
 | 413 | Application request-body limit exceeded | Problem details when Pressroom handles the rejection |
@@ -316,9 +315,9 @@ This is a brief maintenance deployment, not zero-downtime live overwrite. No dat
 
 ## 9. Client library and caller integration
 
-`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, disposition, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. Use a request-object overload to select `Disposition = PdfDisposition.Inline` or `PdfDisposition.Attachment` per request. The caller supplies a reusable HTTP client with a Pressroom base URL and API key from its configuration file; omit the key when using anonymous mode. The HTTP client project has no Playwright dependency.
+`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. The caller supplies a reusable HTTP client with a Pressroom base URL and API key from its configuration file; omit the key when using anonymous mode. The HTTP client project has no Playwright dependency.
 
-For a server-to-server call, the calling application must set its own browser response's `Content-Disposition` from the selected/returned disposition and sanitized filename. Returning only the PDF bytes does not forward Pressroom's HTTP headers. Use typed framework header/file APIs; preserve the per-request display/download choice through the caller's response.
+The calling application owns browser delivery and sets its browser response's `Content-Disposition` using typed framework header/file APIs and the sanitized filename. Pressroom's response headers describe the transfer to the application; copying PDF bytes does not forward those headers to the browser.
 
 The caller owns its total deadline and retry policy. This implementation does not automatically retry; 429/503 responses retain `Retry-After` metadata so an explicit caller policy can choose bounded retries. A caller may instead deliver its HTML when a Pressroom URL is absent or Pressroom is unavailable. A render response/connection failure can drive that decision without a health probe before every call. Do not automatically retry validation/readiness failures or an overall render timeout.
 

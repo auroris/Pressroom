@@ -75,11 +75,10 @@ public sealed class ClientTests
             return Task.FromResult(response);
         });
         IPdfRenderer renderer = new PressroomClient(http);
-        var result = await renderer.RenderAsync(new RenderRequest { Html = "<p>Stream</p>", Disposition = PdfDisposition.Inline }, TestContext.Current.CancellationToken);
+        var result = await renderer.RenderAsync(new RenderRequest { Html = "<p>Stream</p>" }, TestContext.Current.CancellationToken);
         Assert.True(result.PdfStream.CanRead);
         Assert.Equal(0, stream.Position);
         Assert.False(stream.WasDisposed);
-        Assert.Equal(PdfDisposition.Inline, result.Disposition);
         await result.DisposeAsync();
         Assert.True(stream.WasDisposed);
     }
@@ -94,20 +93,19 @@ public sealed class ClientTests
             Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
             using var payload = JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellation));
             Assert.Equal("<p>Résumé</p>", payload.RootElement.GetProperty("html").GetString());
-            Assert.Equal("inline", payload.RootElement.GetProperty("disposition").GetString());
+            Assert.False(payload.RootElement.TryGetProperty("disposition", out _));
             var result = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("%PDF-test"u8.ToArray()) };
             result.Content.Headers.ContentType = new("application/pdf");
-            result.Content.Headers.ContentDisposition = new("inline") { FileNameStar = "résumé.pdf" };
+            result.Content.Headers.ContentDisposition = new("attachment") { FileNameStar = "résumé.pdf" };
             result.Headers.Add("X-Render-Pages", "2");
             result.Headers.Add("X-Render-Duration-Ms", "153");
             return result;
         });
-        var pdf = await new PressroomClient(http).RenderAsync(new() { Html = "<p>Résumé</p>", Disposition = PdfDisposition.Inline }, TestContext.Current.CancellationToken);
+        var pdf = await new PressroomClient(http).RenderAsync(new() { Html = "<p>Résumé</p>" }, TestContext.Current.CancellationToken);
         Assert.Equal("%PDF-test", Encoding.UTF8.GetString(pdf.Bytes));
         Assert.Equal("résumé.pdf", pdf.FileName);
         Assert.Equal(2, pdf.PageCount);
         Assert.Equal(153, pdf.DurationMs);
-        Assert.Equal(PdfDisposition.Inline, pdf.Disposition);
     }
 
     [Fact]

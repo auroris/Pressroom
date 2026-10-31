@@ -14,17 +14,6 @@ public sealed class ContractTests
         Assert.Null(request.Options.TimeoutMs);
         Assert.True(request.Options.JavaScript);
         Assert.True(request.Options.Tagged);
-        Assert.Equal(PdfDisposition.Attachment, request.Disposition);
-    }
-
-    [Theory]
-    [InlineData("inline", PdfDisposition.Inline)]
-    [InlineData("attachment", PdfDisposition.Attachment)]
-    public void DispositionIsExplicitAndRoundTrips(string name, PdfDisposition expected)
-    {
-        var request = JsonSerializer.Deserialize<RenderRequest>($$"""{"html":"hello","disposition":"{{name}}"}""", JsonDefaults.Options)!;
-        Assert.Equal(expected, request.Disposition);
-        Assert.Contains($"\"disposition\":\"{name}\"", JsonSerializer.Serialize(request, JsonDefaults.Options));
     }
 
     [Theory]
@@ -34,6 +23,8 @@ public sealed class ContractTests
     [InlineData("""{"html":"hello","options":{"pageSize":{"width":"8in","width":"9in","height":"11in"}}}""")]
     [InlineData("""{"html":"hello","options":{"scale":"1"}}""")]
     [InlineData("""{"html":"hello","disposition":"download"}""")]
+    [InlineData("""{"html":"hello","disposition":"inline"}""")]
+    [InlineData("""{"html":"hello","disposition":"attachment"}""")]
     [InlineData("""{"html":"hello","disposition":0}""")]
     public void UnknownOrAmbiguousJsonIsRejected(string json)
         => Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RenderRequest>(json, JsonDefaults.Options));

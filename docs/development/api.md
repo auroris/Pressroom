@@ -4,6 +4,20 @@ Pressroom exposes a small HTTP API under `/v1`. All requests and responses are
 UTF-8; request bodies are uncompressed `application/json`. The live OpenAPI
 document at `/openapi/v1.json` describes the same contract.
 
+Pressroom returns PDF bytes and metadata to the calling application. The
+application chooses whether its browser response displays or downloads the PDF;
+see [Returning the PDF to a browser](client.md#returning-the-pdf-to-a-browser).
+
+### Upgrading callers that use disposition
+
+The `disposition` request property and job field have been removed, along with
+`PdfDisposition` and the .NET request/result `Disposition` properties. Remove
+the field from render and job submissions and update the client and contracts
+packages together with the server. Requests that still send it return 400, even
+for `"inline"` or `"attachment"`. Move that choice into the application's browser
+response. Existing stored jobs remain readable; recovery ignores their legacy
+field without exposing it in job responses.
+
 ## Endpoints
 
 | Endpoint | Access | Result |
@@ -27,7 +41,6 @@ header may be omitted; a supplied invalid key is still rejected with 401. See
 {
   "html": "<!doctype html><html lang=\"en\"><head><title>Orders</title></head><body>…</body></html>",
   "fileName": "orders-2026-10.pdf",
-  "disposition": "attachment",
   "printer": null,
   "options": {
     "pageSize": "Letter",
@@ -58,8 +71,7 @@ case-sensitive, unknown properties are rejected, numbers must be JSON numbers, a
 | Field | Type | Default | Rules |
 |---|---|---|---|
 | `html` | string | required | A complete HTML document. `<base>` elements are rejected |
-| `fileName` | string | `document.pdf` | Suggested download name. Sanitized: path separators and control characters replaced, reserved Windows names prefixed, truncated to 120 characters, `.pdf` appended |
-| `disposition` | `"inline"` or `"attachment"` | `attachment` | Selects the response `Content-Disposition`. Other values return 400 |
+| `fileName` | string | `document.pdf` | Suggested PDF filename returned to the application. Sanitized: path separators and control characters replaced, reserved Windows names prefixed, truncated to 120 characters, `.pdf` appended |
 | `printer` | string or null | `null` | A configured printer identifier; switches the response to a print receipt. See [Printing](../printing.md) |
 | `options.pageSize` | name or object | `Letter` (configurable) | `Letter`, `Legal`, `Tabloid`, `A3`, `A4`, `A5` (case-insensitive), or `{ "width": "8.5in", "height": "11in" }` |
 | `options.landscape` | boolean | `false` | Swaps the paper dimensions |
@@ -89,15 +101,16 @@ return 400 with a field-keyed `errors` object.
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/pdf
-Content-Disposition: inline; filename=orders-2026-10.pdf; filename*=UTF-8''orders-2026-10.pdf
+Content-Disposition: attachment; filename=orders-2026-10.pdf; filename*=UTF-8''orders-2026-10.pdf
 Cache-Control: no-store
 X-Render-Pages: 2
 X-Render-Duration-Ms: 1091
 ```
 
 `X-Render-Duration-Ms` measures processing from admission through page counting,
-including queue time. Browser settings and PDF support determine how an `inline`
-response is ultimately displayed; both dispositions return the same bytes.
+including queue time. `Content-Disposition` always uses `attachment` to carry the
+sanitized filename to the caller. It does not configure the application's
+response to its browser; the application sets those headers itself.
 
 ### Print receipt
 
@@ -214,7 +227,7 @@ exactly as synchronous printing does.
 
 A job has `id`, `status` (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`,
 `expired`), `createdUtc`, optional `startedUtc` and `completedUtc`, `expiresUtc`,
-`fileName`, `disposition` and `links`. Queued jobs expose `queuePosition`, the
+`fileName` and `links`. Queued jobs expose `queuePosition`, the
 global submission order; treat it as an estimate because scheduling rotates
 between owners. Succeeded jobs include `pageCount` and `durationMs`. Failed jobs
 carry an `error` with `type`, `title`, `status`, `detail`, `code` and `retryable`.

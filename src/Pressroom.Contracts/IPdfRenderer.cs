@@ -9,7 +9,7 @@ public interface IPdfRenderer
 
 /// <summary>Owns its PDF stream and the underlying response. Dispose after copying the stream.</summary>
 public sealed class PdfRenderResult(Stream pdfStream, int? pageCount, string fileName, long? durationMs,
-    IDisposable? responseOwner = null, PdfDisposition disposition = PdfDisposition.Attachment)
+    IDisposable? responseOwner = null)
     : IDisposable, IAsyncDisposable
 {
     private int _disposed;
@@ -17,7 +17,6 @@ public sealed class PdfRenderResult(Stream pdfStream, int? pageCount, string fil
     public int? PageCount { get; } = pageCount;
     public string FileName { get; } = fileName;
     public long? DurationMs { get; } = durationMs;
-    public PdfDisposition Disposition { get; } = disposition;
 
     public void Dispose()
     {

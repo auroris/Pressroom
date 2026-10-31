@@ -95,7 +95,7 @@ Send a valid `X-Api-Key` and add `printer` to a normal render request:
 }
 ```
 
-`fileName` and `disposition` have no effect on printer output. Omitting `printer`
+`fileName` has no effect on printer output. Omitting `printer`
 or setting it to `null` returns a PDF as usual.
 
 Pressroom renders the document through Chromium, writes the PDF to a private job

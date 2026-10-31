@@ -126,8 +126,9 @@ Invoke-WebRequest -Method Post -Uri http://localhost:5177/v1/render `
   -InFile .\samples\orders-bilingual.request.json -OutFile .\orders.pdf
 ```
 
-The response is `application/pdf` with a `Content-Disposition` header carrying the
-sanitized file name, plus `X-Render-Pages` and `X-Render-Duration-Ms`. Open
+The response is `application/pdf` with a `Content-Disposition: attachment` header
+carrying the sanitized file name, plus `X-Render-Pages` and `X-Render-Duration-Ms`.
+The calling application controls how it serves the PDF to a browser. Open
 `orders.pdf` and you should see the two-page bilingual document with
 "Page 1 / 2" and "Page 2 / 2" footers at the bottom right and no running header.
 
@@ -136,8 +137,7 @@ A minimal request is just the HTML:
 ```json
 {
   "html": "<!doctype html><html><head><title>Hello</title></head><body><h1>Hello</h1></body></html>",
-  "fileName": "hello.pdf",
-  "disposition": "inline"
+  "fileName": "hello.pdf"
 }
 ```
 

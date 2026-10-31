@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Options;
 using Pressroom.Contracts;
 using Pressroom.Rendering;
@@ -13,6 +14,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
     ILogger<LocalJobStore> logger) : IJobStore, IDisposable
 {
     private const long MetadataAllowance = 16 * 1024;
+    private static readonly JsonSerializerOptions StorageReadOptions = CreateStorageReadOptions();
     private readonly JobsSettings _settings = configured.Value;
     private readonly string _root = Path.Combine(ServerConfiguration.ResolveStateRoot(paths.Value), "jobs");
     private readonly object _sync = new();
@@ -45,7 +47,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
                     if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
                         throw new InvalidOperationException("Job storage contains a symbolic link or junction.");
                 foreach (var temporary in Directory.EnumerateFiles(directory, "*.tmp")) File.Delete(temporary);
-                var stored = JsonSerializer.Deserialize<StoredJob>(File.ReadAllBytes(FilePath(id, "job.json")), JsonDefaults.Options)
+                var stored = JsonSerializer.Deserialize<StoredJob>(File.ReadAllBytes(FilePath(id, "job.json")), StorageReadOptions)
                     ?? throw new InvalidOperationException("Job metadata is missing or corrupt.");
                 if (stored.Job.Id != id || stored.SchemaVersion != 1) throw new InvalidOperationException("Job metadata has an unsupported schema or does not match its storage directory.");
                 _jobs.Add(id, stored with { RequestBytes = Length(id, "request.json"), ResultBytes = Length(id, "result.pdf") });
@@ -79,7 +81,7 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
             var job = new RenderJob
             {
                 Id = id, Status = JobStatus.Queued, CreatedUtc = Now, ExpiresUtc = Now + _settings.MaxQueueAge,
-                FileName = RequestValidator.SanitizeFileName(request.FileName), Disposition = request.Disposition, Printer = request.Printer,
+                FileName = RequestValidator.SanitizeFileName(request.FileName), Printer = request.Printer,
                 Links = new($"/v1/jobs/{id}", $"/v1/jobs/{id}/result")
             };
             var stored = new StoredJob(job, owner, hash, bytes.Length, Sequence: ++_nextSequence);
@@ -146,7 +148,24 @@ public sealed class LocalJobStore(IOptions<JobsSettings> configured, IOptions<Pa
     public RenderRequest? ReadRequest(string id)
     {
         lock (_sync) return _jobs.TryGetValue(id, out var job) && job.Job.Status == JobStatus.Queued
-            ? JsonSerializer.Deserialize<RenderRequest>(File.ReadAllBytes(FilePath(id, "request.json")), JsonDefaults.Options) : null;
+            ? JsonSerializer.Deserialize<RenderRequest>(File.ReadAllBytes(FilePath(id, "request.json")), StorageReadOptions) : null;
+    }
+
+    private static JsonSerializerOptions CreateStorageReadOptions()
+    {
+        // Older stores include disposition in both job metadata and queued requests. Ignore only
+        // that retired field during recovery; HTTP requests still reject unknown properties.
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(type =>
+        {
+            if (type.Type != typeof(RenderRequest) && type.Type != typeof(RenderJob)) return;
+            var legacy = type.CreateJsonPropertyInfo(typeof(string), "disposition");
+            legacy.Set = (_, _) => { };
+            type.Properties.Add(legacy);
+        });
+        var options = new JsonSerializerOptions(JsonDefaults.Options) { TypeInfoResolver = resolver };
+        options.MakeReadOnly();
+        return options;
     }
 
     public bool Start(string id)

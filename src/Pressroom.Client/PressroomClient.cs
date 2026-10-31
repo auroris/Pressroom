@@ -14,7 +14,7 @@ public sealed partial class PressroomClient(HttpClient httpClient) : IPdfRendere
         await using var result = await RenderStreamAsync(request, cancellationToken).ConfigureAwait(false);
         using var buffer = new MemoryStream();
         await result.PdfStream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-        return new(buffer.ToArray(), result.FileName, result.PageCount, result.DurationMs, result.Disposition);
+        return new(buffer.ToArray(), result.FileName, result.PageCount, result.DurationMs);
     }
 
     public Task<PdfRenderResult> RenderAsync(string html, RenderOptions options, CancellationToken cancellationToken = default)
@@ -52,14 +52,8 @@ public sealed partial class PressroomClient(HttpClient httpClient) : IPdfRendere
             var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
                 ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? request.FileName;
             var pages = ReadNumber(response, "X-Render-Pages");
-            var disposition = response.Content.Headers.ContentDisposition?.DispositionType?.ToLowerInvariant() switch
-            {
-                "inline" => PdfDisposition.Inline,
-                "attachment" => PdfDisposition.Attachment,
-                _ => request.Disposition
-            };
             return new PdfRenderResult(stream, pages is >= 0 and <= int.MaxValue ? (int?)pages : null,
-                RequestValidator.SanitizeFileName(fileName), ReadNumber(response, "X-Render-Duration-Ms"), response, disposition);
+                RequestValidator.SanitizeFileName(fileName), ReadNumber(response, "X-Render-Duration-Ms"), response);
         }
         catch
         {
@@ -148,8 +142,7 @@ public sealed partial class PressroomClient(HttpClient httpClient) : IPdfRendere
         => response.Headers.TryGetValues(name, out var values) && long.TryParse(values.FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
 }
 
-public sealed record RenderedPdf(byte[] Bytes, string FileName, int? PageCount, long? DurationMs,
-    PdfDisposition Disposition = PdfDisposition.Attachment);
+public sealed record RenderedPdf(byte[] Bytes, string FileName, int? PageCount, long? DurationMs);
 
 public sealed class PressroomException(HttpStatusCode statusCode, string title, string? detail, IReadOnlyDictionary<string, string[]>? errors, TimeSpan? retryAfter)
     : Exception(detail is null ? title : $"{title} {detail}")

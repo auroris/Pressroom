@@ -64,7 +64,7 @@ public sealed partial class PressroomClient
         await using var result = await DownloadStreamAsync(id, cancellationToken).ConfigureAwait(false);
         using var bytes = new MemoryStream();
         await result.PdfStream.CopyToAsync(bytes, cancellationToken).ConfigureAwait(false);
-        return new(bytes.ToArray(), result.FileName, result.PageCount, result.DurationMs, result.Disposition);
+        return new(bytes.ToArray(), result.FileName, result.PageCount, result.DurationMs);
     }
 
     public async Task<PdfRenderResult> DownloadStreamAsync(string id, CancellationToken cancellationToken = default)
@@ -80,8 +80,7 @@ public sealed partial class PressroomClient
             return new(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
                 pages is >= 0 and <= int.MaxValue ? (int?)pages : null,
                 RequestValidator.SanitizeFileName(disposition?.FileNameStar ?? disposition?.FileName?.Trim('"')),
-                ReadNumber(response, "X-Render-Duration-Ms"), response,
-                string.Equals(disposition?.DispositionType, "inline", StringComparison.OrdinalIgnoreCase) ? PdfDisposition.Inline : PdfDisposition.Attachment);
+                ReadNumber(response, "X-Render-Duration-Ms"), response);
         }
         catch { response.Dispose(); throw; }
     }

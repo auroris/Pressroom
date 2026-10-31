@@ -13,7 +13,7 @@ documents under `docs/` as the source of truth for current behaviour.
 
 **What it is.** Pressroom is a .NET 10 ASP.NET Core minimal API that turns one
 complete HTML document into a PDF through Playwright and a pinned Chromium headless
-shell. Callers `POST /v1/render` with JSON (`html`, `fileName`, `disposition`,
+shell. Callers `POST /v1/render` with JSON (`html`, `fileName`,
 `printer`, `options{...}`) and receive `application/pdf` with `X-Render-Pages` and
 `X-Render-Duration-Ms`, or, with a `printer`, a 202 JSON receipt after the PDF is
 handed to a Windows printer through SumatraPDF. `GET /v1/health` is anonymous;
@@ -26,7 +26,7 @@ access mode. Full contract: `docs/api.md`.
 
 | Project | Role | Dependencies |
 |---|---|---|
-| `src/Pressroom.Contracts` | `RenderRequest`, `RenderOptions`, `PageSize`, `PageMargins`, `ReadinessOptions`, `PdfDisposition`, `PrintJobResult`, `IPdfRenderer`, `PdfRenderResult`, `RequestValidator`, `JsonDefaults` | BCL only |
+| `src/Pressroom.Contracts` | `RenderRequest`, `RenderOptions`, `PageSize`, `PageMargins`, `ReadinessOptions`, `PrintJobResult`, `IPdfRenderer`, `PdfRenderResult`, `RequestValidator`, `JsonDefaults` | BCL only |
 | `src/Pressroom.Client` | `PressroomClient(HttpClient)` implementing `IPdfRenderer`: `RenderAsync` (buffered `RenderedPdf`), `RenderStreamAsync`, `PrintAsync`, `IsReadyAsync`; `PressroomException(StatusCode, Detail, Errors, RetryAfter)` | Contracts |
 | `src/Pressroom.Rendering` | `BrowserRenderer : IHtmlRenderer, IHostedService` (browser supervisor, slots via `SemaphoreSlim(Concurrency)`, warm-up, sandbox verification, recycling after `RestartAfterRenders`), `DocumentValidator`, `FontCatalog`, `OwnedDriverProcess`, `WindowsProcessJob`, packaged Noto Sans fonts | Microsoft.Playwright 1.64.1, AngleSharp, PdfPig |
 | `src/Pressroom.Server` | Endpoints, `ApiKeyAuthenticationHandler`, `AdmissionGate` (`Concurrency + QueueLimit` permits held until the response completes), `BoundedBodyReader`, `ConfigurationValidationService`, `PrintService`, `Pressroom.Publish.targets`, `web.config` | Rendering, Contracts, Serilog |
@@ -350,7 +350,7 @@ render. An asynchronous mode lets a caller submit work, go away, and collect res
 |---|---|---|
 | `POST /v1/jobs` | Configured access mode (same as render) | Body identical to `POST /v1/render` (printer allowed on Windows). Validates fully, stores the request, enqueues. Returns **202** with `Location: /v1/jobs/{id}` and a JSON job document. 429 with `Retry-After` when the job queue is full (global or per key). Supports `Idempotency-Key` header: same key plus same caller within the retention window returns the existing job |
 | `GET /v1/jobs/{id}` | Owner only | Job document: `id`, `status` (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`, `expired`), `createdUtc`, `startedUtc`, `completedUtc`, `expiresUtc`, `queuePosition` while queued, `pageCount` and `durationMs` when succeeded, `error` (problem-details shape) when failed, `printer` and `printJob` for print jobs. Returns `Retry-After` while not terminal |
-| `GET /v1/jobs/{id}/result` | Owner only | The PDF with the same headers as the sync response (`Content-Disposition` from the stored request, `X-Render-Pages`, `X-Render-Duration-Ms`, `Cache-Control: no-store`). 409 with `Retry-After` while the job is not finished; 410 after expiry or deletion; 404 for unknown ids |
+| `GET /v1/jobs/{id}/result` | Owner only | The PDF with the same headers as the sync response (fixed `Content-Disposition: attachment` carrying the stored filename, `X-Render-Pages`, `X-Render-Duration-Ms`, `Cache-Control: no-store`). The caller controls browser delivery. 409 with `Retry-After` while the job is not finished; 410 after expiry or deletion; 404 for unknown ids |
 | `DELETE /v1/jobs/{id}` | Owner only | Cancels a queued or rendering job, or deletes a stored result early. 204. Idempotent |
 | `GET /v1/jobs?status=&limit=&after=` | Owner only | The caller's own jobs, newest first, for reconciliation after a client crash. Bounded page size |
 

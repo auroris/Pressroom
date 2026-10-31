@@ -17,8 +17,6 @@
   <a href="https://github.com/auroris/Pressroom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/auroris/Pressroom?label=release&color=2ea44f"></a>
 </p>
 
-![A render request on the left, its PDF response headers below it, and the two rendered Letter pages of the bilingual sample document on the right](docs/images/hero.png)
-
 <p align="center">
   <strong><a href="https://github.com/auroris/Pressroom/releases/latest">⬇ Download the latest release</a></strong>
 </p>
@@ -33,7 +31,7 @@ it runs. The server needs the .NET 10 Hosting Bundle and nothing else: no Node, 
 Chrome, no font installation, no downloads at run time.
 
 - **One request, one PDF.** Send `html`, get `application/pdf` with the page count
-  and render time in the headers. Choose inline display or attachment per request.
+  and render time in the headers. Your application controls delivery to the browser.
 - **Paper-aware output.** Named and custom page sizes, margins, scale, print or
   screen media, running headers and footers with page numbers, tagged PDF, and a
   document outline built from your headings.

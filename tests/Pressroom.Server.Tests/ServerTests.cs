@@ -303,24 +303,21 @@ public sealed class ServerTests
         Assert.Equal("Letter", app.Renderer.LastRequest.Options.PageSize!.Name);
     }
 
-    [Theory]
-    [InlineData("inline")]
-    [InlineData("attachment")]
-    public async Task CallerCanSelectDispositionWithSafeUnicodeFileName(string disposition)
+    [Fact]
+    public async Task PdfResponseCarriesSafeUnicodeFileName()
     {
         using var app = new TestApplication();
         using var client = app.CreateAuthenticatedClient();
         var json = JsonSerializer.Serialize(new
         {
             html = "<!doctype html><html><body><p>Rapport</p></body></html>",
-            fileName = "rapport/été\r\n2026.pdf",
-            disposition
+            fileName = "rapport/été\r\n2026.pdf"
         }, JsonDefaults.Options);
         using var response = await client.PostAsync("/v1/render", new StringContent(json, Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/pdf", response.Content.Headers.ContentType!.MediaType);
         var header = response.Content.Headers.ContentDisposition!;
-        Assert.Equal(disposition, header.DispositionType);
+        Assert.Equal("attachment", header.DispositionType);
         Assert.Equal("rapport_été__2026.pdf", header.FileNameStar);
         Assert.All(header.FileName!, character => Assert.True(character is >= ' ' and <= '~'));
         Assert.DoesNotContain('\r', header.ToString());
@@ -328,24 +325,14 @@ public sealed class ServerTests
         Assert.Equal("1", response.Headers.GetValues("X-Render-Pages").Single());
     }
 
-    [Fact]
-    public async Task OmittedDispositionDefaultsToAttachment()
-    {
-        using var app = new TestApplication();
-        using var client = app.CreateAuthenticatedClient();
-        using var response = await client.PostAsync("/v1/render",
-            new StringContent("{\"html\":\"<p>Default download</p>\"}", Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("attachment", response.Content.Headers.ContentDisposition!.DispositionType);
-        Assert.Equal("document.pdf", response.Content.Headers.ContentDisposition.FileNameStar);
-    }
-
     [Theory]
+    [InlineData("\"inline\"")]
+    [InlineData("\"attachment\"")]
     [InlineData("\"download\"")]
     [InlineData("\"INLINE\"")]
     [InlineData("1")]
     [InlineData("null")]
-    public async Task InvalidDispositionIsRejectedBeforeRendering(string jsonDisposition)
+    public async Task RemovedDispositionIsRejectedBeforeRendering(string jsonDisposition)
     {
         using var app = new TestApplication();
         using var client = app.CreateAuthenticatedClient();

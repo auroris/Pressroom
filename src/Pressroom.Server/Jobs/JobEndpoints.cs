@@ -3,7 +3,6 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
-using Microsoft.Net.Http.Headers;
 using Pressroom.Contracts;
 using Pressroom.Rendering;
 using Pressroom.Server.Authentication;
@@ -130,10 +129,8 @@ public static class JobEndpoints
         }
         context.Response.Headers["X-Render-Pages"] = job.PageCount?.ToString(CultureInfo.InvariantCulture);
         context.Response.Headers["X-Render-Duration-Ms"] = job.DurationMs?.ToString(CultureInfo.InvariantCulture);
-        var disposition = new ContentDispositionHeaderValue(job.Disposition == PdfDisposition.Inline ? "inline" : "attachment");
-        disposition.SetHttpFileName(job.FileName);
-        context.Response.GetTypedHeaders().ContentDisposition = disposition;
-        await Results.Stream(download.Stream, "application/pdf", enableRangeProcessing: false).ExecuteAsync(context);
+        await Results.Stream(download.Stream, "application/pdf", fileDownloadName: job.FileName,
+            enableRangeProcessing: false).ExecuteAsync(context);
         await context.Response.CompleteAsync();
         context.RequestAborted.ThrowIfCancellationRequested();
         store.CompleteDownload(id);

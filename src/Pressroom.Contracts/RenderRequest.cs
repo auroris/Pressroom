@@ -7,7 +7,6 @@ public sealed record RenderRequest
 {
     public string Html { get; init; } = "";
     public string? FileName { get; init; } = "document.pdf";
-    public PdfDisposition Disposition { get; init; } = PdfDisposition.Attachment;
     /// <summary>Configured printer identifier. Null returns a PDF; printing requires a valid API key.</summary>
     public string? Printer { get; init; }
     public RenderOptions? Options { get; init; } = new();
@@ -15,32 +14,6 @@ public sealed record RenderRequest
 
 /// <summary>Submission receipt, not confirmation of physical printing or a spooler job ID.</summary>
 public sealed record PrintJobResult(string JobId, string Printer, string Status, int PageCount);
-
-[JsonConverter(typeof(PdfDispositionJsonConverter))]
-public enum PdfDisposition
-{
-    Inline,
-    Attachment
-}
-
-public sealed class PdfDispositionJsonConverter : JsonConverter<PdfDisposition>
-{
-    public override PdfDisposition Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => reader.TokenType == JsonTokenType.String ? reader.GetString() switch
-        {
-            "inline" => PdfDisposition.Inline,
-            "attachment" => PdfDisposition.Attachment,
-            _ => throw new JsonException("disposition must be inline or attachment.")
-        } : throw new JsonException("disposition must be inline or attachment.");
-
-    public override void Write(Utf8JsonWriter writer, PdfDisposition value, JsonSerializerOptions options)
-        => writer.WriteStringValue(value switch
-        {
-            PdfDisposition.Inline => "inline",
-            PdfDisposition.Attachment => "attachment",
-            _ => throw new JsonException("disposition must be inline or attachment.")
-        });
-}
 
 public sealed record RenderOptions
 {

@@ -216,12 +216,17 @@ file-only configuration and API-key/anonymous authentication update.
   Noto rule; custom embedded header/footer fonts are therefore unsupported in this
   initial implementation.
 
-### Response disposition checks
+### Historical response disposition checks (superseded)
 
 The consolidated passing suite verified explicit inline and attachment responses,
 the attachment default, sanitized Unicode filenames, PDF content type, and 400
 responses for invalid disposition values/types. The HTTP client serializes the
 choice and preserves the response disposition in buffered and streaming results.
+
+These checks describe the former contract. The disposition setting has since
+been removed: browser delivery belongs to the calling application. Current
+coverage checks PDF bytes and safe filename metadata, rejection of the removed
+request field, and recovery of stored jobs that contain the legacy field.
 
 An additional real HTTP smoke render returned a two-page bilingual PDF through the
 compiled service, with readiness, authenticated info, and OpenAPI returning 200.
