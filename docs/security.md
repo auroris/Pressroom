@@ -1,6 +1,6 @@
 # Security model
 
-Pressroom is built for one job on a trusted network: applications you control send
+Pressroom is built for one job: applications you control send
 HTML, and a server you control turns it into PDF. This page describes the
 boundaries it enforces, what it deliberately does not promise, and how to deploy it
 accordingly.
@@ -12,8 +12,8 @@ accordingly.
 - **Documents** are not trusted. Every render runs in a fresh, isolated browser
   context with the controls below, whether the HTML came from a template or from
   user input upstream.
-- **The server** holds the keys and the browser. It should sit on an internal
-  network behind HTTPS, under a least-privileged identity.
+- **The server** holds the keys and the browser. Run it behind HTTPS under a
+  least-privileged identity, using the deployment recommendation below for its exposure.
 
 ## Document isolation
 
@@ -35,9 +35,10 @@ context:
 
 Two known behaviours of the pinned Chromium build surface as render errors rather
 than weaknesses: a header or footer template that attempts an external load can be
-rejected at print time, and a WebRTC attempt inside a `srcdoc` or blank child frame
-can crash that render under the connection policy. Both return a content-free
-document error, the context is closed, and later renders remain usable.
+rejected at print time or reach the request deadline, and a WebRTC attempt inside
+a `srcdoc` or blank child frame can crash that render under the connection policy.
+These failures produce content-free errors, the context is closed, and later
+renders remain usable.
 
 ## Authentication
 
@@ -72,7 +73,7 @@ With jobs enabled, HTML/PDFs live under `<StateRoot>/jobs/<id>` for configured
 retention. Linux uses 0700 directories/0600 files; Windows uses a protected
 service-SID DACL. Use volume encryption for encryption at rest. Successful jobs
 remove HTML; failed input and results follow [retention settings](configuration.md).
-Storage is locked to one instance. Queued jobs survive restart; active jobs become
+Storage is locked to one instance. With persistent storage, queued jobs survive restart; active jobs become
 failed/interrupted. Interrupted printing may have reached the Windows spooler.
 
 Owners are API key identifiers. Rotating a secret under the same identifier keeps
@@ -81,9 +82,11 @@ and cannot list those jobs. Anonymous jobs share one principal: any anonymous
 caller can list and retrieve them, including callers who know an ID. Prefer
 API-key mode. Cancellation cannot retract already-spooled pages.
 
-Containers add a non-root identity and read-only root with writable state volume.
-Egress policy still belongs to a firewall or NetworkPolicy. No callbacks or
-outbound job delivery are implemented. Job logs remain metadata only.
+The Linux container recipe uses a non-root identity, a read-only root, and temporary
+memory-backed state. Windows uses ContainerUser and a disposable writable layer;
+stop and recreate it to discard state. See [containers](container.md) for the
+lifecycle differences. Egress policy belongs to a firewall or NetworkPolicy.
+No callbacks or outbound job delivery are implemented. Job logs remain metadata only.
 
 ## Resource protection
 
@@ -100,12 +103,19 @@ outbound job delivery are implemented. Job logs remain metadata only.
 
 ## Deployment recommendations
 
-- Keep Pressroom on an internal network and terminate HTTPS at IIS; API keys and
-  document content travel in the clear otherwise.
-- Run a dedicated application pool identity with read and execute access to the
-  release folder, read access to the settings file, and Modify access only to
-  `temp` and `logs`. See [Deployment](deployment.md).
-- Store the settings file outside the release folder, restricted to the pool
+- **Internet-facing use:** use [Linux Docker with iptables isolation](container.md#optional-linux-outbound-isolation),
+  API-key authentication, and an HTTPS reverse proxy in front of the loopback-bound
+  API. Enable the documented outbound blocking for this Docker deployment. A
+  [direct Linux installation](linux.md) is also suitable when it runs under a
+  dedicated unprivileged user, with API keys and HTTPS.
+- **Intranet use:** Windows/IIS installations and Windows containers are intended
+  primarily for networks where Pressroom is not exposed to internet traffic.
+  Both Linux options also work here. Use HTTPS and application-specific keys
+  here too. Host firewall configuration remains an optional deployment choice.
+- On IIS, run a dedicated application pool identity with read and execute access
+  to the release folder and the documented state-directory permissions.
+  See [Deployment](deployment.md).
+- Store the settings file outside the release folder, restricted to the service
   identity and administrators. Keep secrets out of `web.config`, `appsettings.json`,
   and publish profiles.
 - Give each calling application its own key, and opt in `AllowJavaScript` only

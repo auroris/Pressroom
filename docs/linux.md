@@ -1,5 +1,12 @@
 # Linux deployment
 
+Direct Linux is suitable for internet-facing or intranet use when Pressroom runs
+under a dedicated unprivileged user. Use API-key authentication and put an HTTPS
+reverse proxy in front of the loopback-bound service. [Linux Docker with iptables
+isolation](container.md) remains the preferred container option for internet-facing
+traffic. An unprivileged identity does not itself block outbound connections;
+host egress restrictions are a separate optional deployment setting.
+
 Pressroom supports Linux x64 with the .NET 10 ASP.NET Core runtime and Chromium's
 sandbox enabled. Printing is Windows-only. Record target-host qualification in
 [Linux acceptance](linux-acceptance.md).

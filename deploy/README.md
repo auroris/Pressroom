@@ -1,5 +1,12 @@
 # Deployment examples
 
+For internet-facing use, choose Linux Docker with the documented iptables isolation,
+API-key authentication, and an HTTPS reverse proxy. Direct Linux under a dedicated
+unprivileged user is also suitable. Windows/IIS and Windows containers are intended
+primarily for intranets where Pressroom is not exposed to internet traffic.
+Basic Compose remains available without host firewall changes;
+the internet-facing recommendation uses the isolated overlay below.
+
 `compose.yaml` and `kubernetes.yaml` use a mounted JSON settings file and one
 service instance. Replace the version and create the settings file/Secret before
 starting. `check.settings.json` is anonymous and intended only for an offline

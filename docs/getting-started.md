@@ -1,8 +1,10 @@
 # Getting started
 
 This guide takes you from a release ZIP to your first PDF in about ten minutes.
-It uses a local console run so you can see everything happen; the
-[Deployment guide](deployment.md) covers the production IIS setup.
+It uses a local Windows console run for an intranet; the
+[Deployment guide](deployment.md) covers the production IIS setup. For internet-facing
+use, prefer [Linux Docker with iptables isolation](container.md), or run
+[direct Linux](linux.md) under a dedicated unprivileged user.
 
 ## 1. Download and extract a release
 
