@@ -59,5 +59,8 @@
     <!-- NuGet's Node payload can have owner-only execute permission. A release is
          installed by root and executed by a different identity, including in Docker. -->
     <Exec Command="chmod 755 &quot;$(PublishDir).playwright/node/linux-x64/node&quot; &quot;$(PublishDir)Pressroom.Server&quot;" />
+    <!-- Browser archives also contain owner-only metadata. All published files
+         must be readable when packaged or installed by a different identity. -->
+    <Exec Command="chmod -R a+rX &quot;$(PublishDir)&quot;" />
   </Target>
 </Project>

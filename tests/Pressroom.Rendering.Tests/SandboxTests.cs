@@ -318,6 +318,7 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
             <img src="{{origin}}/print-image"></div>
             """;
         RenderOutput? result = null;
+        using var templateDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
             result = await fixture.RenderAsync("<p>PRINT_BODY</p>", new()
@@ -326,12 +327,17 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
                 HeaderTemplate = template,
                 FooterTemplate = template,
                 Margins = new() { Top = "1in", Bottom = "1in", Left = "1in", Right = "1in" }
-            });
+            }, templateDeadline.Token);
         }
         catch (RenderDocumentException)
         {
             // Chromium can reject printing templates with blocked external assets.
             // Rejection is safe only if the attempted assets never reach the listener.
+        }
+        catch (OperationCanceledException) when (templateDeadline.IsCancellationRequested)
+        {
+            // Chromium can also remain waiting for a blocked print-template asset.
+            // Require bounded cancellation, no traffic, and a successful next render.
         }
         Assert.False(listener.Pending(), "A print header or footer reached the loopback TCP listener.");
         if (result is not null)
