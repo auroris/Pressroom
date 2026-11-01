@@ -17,6 +17,8 @@
   <a href="https://github.com/auroris/Pressroom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/auroris/Pressroom?label=release&color=2ea44f"></a>
 </p>
 
+![A render request on the left, its PDF response headers below it, and the two rendered Letter pages of the bilingual sample document on the right](docs/images/hero.png)
+
 <p align="center">
   <strong><a href="https://github.com/auroris/Pressroom/releases/latest">⬇ Download the latest release</a></strong>
 </p>
