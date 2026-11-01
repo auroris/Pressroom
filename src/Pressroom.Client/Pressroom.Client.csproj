@@ -3,12 +3,14 @@
   <PropertyGroup>
     <PackageId>AurorisNet.Pressroom.Client</PackageId>
     <Description>HTTP client for Pressroom. Does not install or depend on Playwright.</Description>
+    <!-- Contracts is public to source consumers, but its assembly is bundled when packing. -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeContractsInPackage</TargetsForTfmSpecificBuildOutput>
     <TargetsForTfmSpecificDebugSymbolsInPackage>$(TargetsForTfmSpecificDebugSymbolsInPackage);IncludeContractsSymbolsInPackage</TargetsForTfmSpecificDebugSymbolsInPackage>
   </PropertyGroup>
   <ItemGroup>
     <!-- Contracts ships inside this package instead of as a NuGet dependency. -->
-    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" PrivateAssets="All" />
+    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
   </ItemGroup>
   <!-- Use the built copy-local outputs so packing with NoBuild never rebuilds references. -->
   <Target Name="IncludeContractsInPackage">
