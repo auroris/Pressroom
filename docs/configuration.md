@@ -200,8 +200,9 @@ including for an executable override, and requires that test to pass.
 Coordinate the server update with calling applications that send `disposition`.
 That request setting has been removed and now returns 400; applications must
 choose browser display or download in their own response headers. Update the
-.NET client and contracts packages together with the server. Stored jobs from
-earlier releases remain readable, including queued requests with the legacy field.
+`AurorisNet.Pressroom.Client` package (including contracts) together with the server.
+Stored jobs from earlier releases remain readable, including queued requests with
+the legacy field.
 
 - Replace string key values with objects: `"key": "secret"` becomes
   `"key": { "Secret": "secret" }`. Add `"AllowJavaScript": true` only to keys that

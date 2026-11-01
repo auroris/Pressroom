@@ -220,7 +220,7 @@ Three jobs run in parallel after input validation:
 
 | GitHub artifact | Contents |
 |---|---|
-| `nuget-packages` | `Pressroom.Client` and its `Pressroom.Contracts` dependency, each as `.nupkg` and `.snupkg`, with SHA-256 files |
+| `nuget-packages` | `AurorisNet.Pressroom.Client`, bundling the client and contracts assemblies, as `.nupkg` and `.snupkg` with SHA-256 files |
 | `windows-install-packages` | `Pressroom-<version>-win-x64-framework-dependent.zip` and its SHA-256 file, for IIS or local Windows hosting |
 | `linux-install-packages` | `Pressroom-<version>-linux-x64-framework-dependent.tar.gz`, its SHA-256 file, and the verification image's SBOM |
 
@@ -245,7 +245,40 @@ versions with a suffix are marked prerelease automatically. Only this optional j
 has repository write permission. It verifies all package checksums and creates
 `v<version>` at the selected commit; existing tags and releases are never overwritten.
 Use an unused version when creating a release. If an interrupted upload leaves a
-tag or draft, inspect it before retrying. A package-only run can reuse a version.
+tag or draft, inspect it before retrying. A run that only builds artifacts can reuse a version.
+
+Optionally enable **publish_nuget** to publish `AurorisNet.Pressroom.Client` and its
+symbols to NuGet.org after all three build jobs pass. This checkbox defaults to off
+and is independent of **create_release**; **draft** does not defer a selected NuGet
+publication. Publishing uses [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing):
+the publishing job downloads the verified artifact, checks its hashes, then uses
+GitHub OIDC through the pinned `NuGet/login` action to obtain a temporary API key
+immediately before pushing the package and symbols. Only that job has
+`id-token: write`; no stored NuGet API-key secret is used and no rebuild occurs.
+
+Set up the account and repository once before selecting **publish_nuget**:
+
+1. Sign in to NuGet.org as `AurorisNet`, open **Trusted Publishing** from the
+   profile menu, and add a GitHub policy for the intended package owner. Use
+   `AurorisNet` as the policy owner when publishing under that personal profile.
+2. Enter the policy values below. The workflow field takes only the filename.
+3. In GitHub **Settings → Secrets and variables → Actions → Variables**, set the
+   repository variable `NUGET_USER` to `AurorisNet` (the NuGet profile username).
+   A missing variable fails workflow input validation; the login step validates
+   the NuGet policy when publishing.
+
+| NuGet policy field | Value |
+|---|---|
+| Repository owner | `auroris` |
+| Repository | `Pressroom` |
+| Workflow file | `release.yml` |
+| Environment | Leave blank; this job does not use a GitHub environment |
+| Package glob | `AurorisNet.Pressroom.Client` |
+| Scopes | Push new packages and new package versions |
+
+Use a version not already published to NuGet.org; duplicates fail. If a push is
+interrupted, inspect the package and symbols on NuGet.org before retrying. A
+version suffix controls NuGet prerelease status.
 
 Bump `Version` in `Directory.Build.props` and the `-Version` defaults of the build
 helpers when starting a new release line, so local builds and workflow runs agree.
@@ -263,30 +296,34 @@ anonymous pulls. Uncheck `publish` for verification only. Tags are listed in the
 ## NuGet packages
 
 Contracts and Client target `net8.0;net10.0`. The server and renderer remain .NET 10
-and are not packable. The client tests run on both frameworks (install both runtimes).
+and are not packable. Contracts remains a shared source project and is not packable
+on its own. Only Client produces a NuGet package, named `AurorisNet.Pressroom.Client`,
+containing both assemblies. The client tests run on both frameworks (install both runtimes).
 
 ```sh
 dotnet restore Pressroom.slnx --locked-mode
-dotnet pack src/Pressroom.Contracts -c Release -o artifacts/nuget --no-restore
 dotnet pack src/Pressroom.Client -c Release -o artifacts/nuget --no-restore
 ```
 
 Pass the same `-p:Version=1.2.3-rc.1` to restore, build and pack for a prerelease.
-Packages contain both target assemblies, a README, icon, MIT metadata, and portable
-PDBs in `.snupkg`. Source Link points at the build commit; CI normalizes build paths.
+The package contains `Pressroom.Client.dll` and `Pressroom.Contracts.dll` for each
+target, a README, icon, and MIT metadata. Its `.snupkg` contains portable PDBs for
+both assemblies and frameworks. Source Link points at the build commit; CI normalizes build paths.
 Package validation checks framework compatibility. After the first stable release,
 set `PackageValidationBaselineVersion` in `build/ClientPackage.props` to that
 published version and refresh the lock files. Subsequent releases must pass that
 [API baseline](https://learn.microsoft.com/dotnet/fundamentals/apicompat/package-validation/baseline-version-validator).
 
-The Packages workflow keeps the client and contracts packages on GitHub. Download
-and extract `nuget-packages` from a successful run, or download both `.nupkg` files
-from a GitHub release into a local feed directory. See [client installation](client.md#installing-the-package).
-Packages are unsigned; `dotnet nuget verify` checks signatures, not Source Link.
+The Packages workflow always keeps the client package and symbols on GitHub and
+optionally publishes them to NuGet.org through **publish_nuget**. Download and extract
+`nuget-packages` from a successful run, or download the single `.nupkg` file from a
+GitHub release into a local feed directory. See [client installation](client.md#installing-the-package).
+Locally built packages are unsigned; `dotnet nuget verify` checks signatures, not Source Link.
 Inspect Source Link in the PDB or NuGet Package Explorer.
 
-`build/Test-ClientPackages.ps1 -ServerUrl http://127.0.0.1:5177/` creates fresh
-web API consumers for both targets, installs packages from `artifacts/nuget`,
+`build/Test-ClientPackages.ps1 -ServerUrl http://127.0.0.1:5177/` checks the bundled
+assemblies, symbols, and absence of package dependencies, creates fresh web API
+consumers for both targets, installs the client package from `artifacts/nuget`,
 compiles the client example and renders against an anonymous loopback test server.
 Use `-Net8Dotnet` if the .NET 8 runtime is installed separately. Each run uses a
 private package cache so an older local package with the same version cannot mask

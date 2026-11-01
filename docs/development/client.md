@@ -1,27 +1,34 @@
 # .NET client
 
-`Pressroom.Client` handles HTTP requests, validation, streaming and error mapping
-for .NET 8 and .NET 10 applications. It uses `Pressroom.Contracts` and the .NET base
-class library to call a running Pressroom service. Applications in other languages
+`AurorisNet.Pressroom.Client` handles HTTP requests, validation, streaming and error
+mapping for .NET 8 and .NET 10 applications. This single NuGet package includes the
+`Pressroom.Client` and `Pressroom.Contracts` assemblies and uses the .NET base class
+library to call a running Pressroom service. Applications in other languages
 can use any HTTP client to call the [API](api.md).
 
 ## Installing the package
 
-Download and extract the `nuget-packages` artifact from a successful
-[Packages workflow run](https://github.com/auroris/Pressroom/actions/workflows/release.yml),
-or download both `Pressroom.Client` and `Pressroom.Contracts` `.nupkg` files from a
-GitHub release. Keep them together in a local feed directory, such as `./packages`,
-and install the matching version:
+For versions published to NuGet.org:
 
 ```sh
-dotnet add package Pressroom.Client --version <version> --source ./packages
+dotnet add package AurorisNet.Pressroom.Client --version <version>
 ```
 
+For GitHub builds, download and extract the `nuget-packages` artifact from a successful
+[Packages workflow run](https://github.com/auroris/Pressroom/actions/workflows/release.yml),
+or download `AurorisNet.Pressroom.Client.<version>.nupkg` from a GitHub release.
+Place it in a local feed directory, such as `./packages`, and add `--source ./packages`
+to the command above. Symbols and SHA-256 files are included in the download too.
+
 `Pressroom.Contracts` holds the request and option records, `IPdfRenderer`, the
-validator, and the JSON settings, and can be referenced on its own by code that
-only builds requests. The workflows distribute these packages only through GitHub;
-they do not publish them to NuGet.org or another NuGet feed. Symbol packages and
-SHA-256 files are included in the download too.
+validator, and the JSON settings. Its assembly is bundled in the client package;
+there is no separate Contracts package dependency. The source projects and C#
+namespaces remain separate.
+
+When upgrading from the old distribution, remove both `Pressroom.Client` and
+`Pressroom.Contracts` package references and add `AurorisNet.Pressroom.Client`.
+Existing `using Pressroom.Client;` and `using Pressroom.Contracts;` statements
+continue to work.
 
 ## Creating a client
 

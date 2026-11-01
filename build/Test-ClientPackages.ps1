@@ -9,6 +9,31 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $feedPath = (Resolve-Path $Feed).Path
+$packageId = 'AurorisNet.Pressroom.Client'
+$package = [IO.Compression.ZipFile]::OpenRead((Join-Path $feedPath "$packageId.$Version.nupkg"))
+try {
+    foreach ($entry in @('README.md', 'icon.png', 'lib/net8.0/Pressroom.Client.dll',
+        'lib/net8.0/Pressroom.Contracts.dll', 'lib/net10.0/Pressroom.Client.dll',
+        'lib/net10.0/Pressroom.Contracts.dll')) {
+        if (!$package.GetEntry($entry)) { throw "Client package is missing $entry." }
+    }
+    $reader = [IO.StreamReader]::new($package.GetEntry("$packageId.nuspec").Open())
+    try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    if ($spec.package.metadata.id -cne $packageId -or $spec.package.metadata.version -cne $Version) {
+        throw 'Unexpected client package identity or version.'
+    }
+    if ($spec.SelectNodes('//*[local-name()="dependency"]').Count -ne 0) {
+        throw 'The bundled client must not require any NuGet dependencies.'
+    }
+} finally { $package.Dispose() }
+$symbols = [IO.Compression.ZipFile]::OpenRead((Join-Path $feedPath "$packageId.$Version.snupkg"))
+try {
+    foreach ($framework in @('net8.0', 'net10.0')) {
+        foreach ($assembly in @('Pressroom.Client', 'Pressroom.Contracts')) {
+            if (!$symbols.GetEntry("lib/$framework/$assembly.pdb")) { throw "Missing $framework symbols for $assembly." }
+        }
+    }
+} finally { $symbols.Dispose() }
 $smokeRoot = Join-Path $PSScriptRoot ('../artifacts/package-smoke/' + [Guid]::NewGuid().ToString('N'))
 # The destination must be an anonymous local test server; no keys are placed on command lines.
 if (!$BuildOnly -and !$ServerUrl.IsLoopback) { throw 'Use a loopback test server for this package smoke check.' }
@@ -19,7 +44,7 @@ $escapedFeed = [Security.SecurityElement]::Escape($feedPath)
 <configuration>
   <packageSources><clear /><add key="local" value="$escapedFeed" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
   <packageSourceMapping>
-    <packageSource key="local"><package pattern="Pressroom.*" /></packageSource>
+    <packageSource key="local"><package pattern="$packageId" /></packageSource>
     <packageSource key="nuget.org"><package pattern="Microsoft.*" /></packageSource>
   </packageSourceMapping>
 </configuration>
@@ -32,9 +57,9 @@ foreach ($framework in @('net8.0', 'net10.0')) {
     $projectText = (Get-Content $project -Raw).Replace('net10.0', $framework)
     $projectText = $projectText.Replace('</PropertyGroup>', "<RestorePackagesPath>$smokeRoot/.packages</RestorePackagesPath></PropertyGroup>")
     $projectText | Set-Content $project
-    dotnet add $project package Pressroom.Client --version $Version --no-restore
+    dotnet add $project package $packageId --version $Version --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Could not install local client package.' }
-    # Source mapping keeps Pressroom local while allowing missing SDK targeting packs.
+    # Source mapping keeps the client local while allowing missing SDK targeting packs.
     dotnet restore $project --configfile $nugetConfig
     if ($LASTEXITCODE -ne 0) { throw 'Consumer package restore failed.' }
     @'
@@ -61,7 +86,7 @@ Console.WriteLine($"Consumer {System.Runtime.InteropServices.RuntimeInformation.
     dotnet build $project -c Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Consumer build failed.' }
     if ($BuildOnly) {
-        Write-Host "Consumer $framework compiled against the locally packed client and contracts."
+        Write-Host "Consumer $framework compiled against the bundled $packageId package."
         continue
     }
     $dll = Join-Path $directory "bin/Release/$framework/$([IO.Path]::GetFileNameWithoutExtension($project)).dll"

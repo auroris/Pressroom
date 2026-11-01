@@ -129,11 +129,8 @@
           "xunit.v3.runner.common": "[4.0.2]"
         }
       },
-      "pressroom.client": {
-        "type": "Project",
-        "dependencies": {
-          "Pressroom.Contracts": "[0.1.0, )"
-        }
+      "AurorisNet.Pressroom.Client": {
+        "type": "Project"
       },
       "pressroom.contracts": {
         "type": "Project"
@@ -267,11 +264,8 @@
           "xunit.v3.runner.common": "[4.0.2]"
         }
       },
-      "pressroom.client": {
-        "type": "Project",
-        "dependencies": {
-          "Pressroom.Contracts": "[0.1.0, )"
-        }
+      "AurorisNet.Pressroom.Client": {
+        "type": "Project"
       },
       "pressroom.contracts": {
         "type": "Project"

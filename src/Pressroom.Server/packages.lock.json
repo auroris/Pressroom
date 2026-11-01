@@ -124,7 +124,7 @@
           "AngleSharp": "[1.8.5, )",
           "Microsoft.Playwright": "[1.64.1, )",
           "PdfPig": "[0.1.16, )",
-          "Pressroom.Contracts": "[0.1.0, )"
+          "Pressroom.Contracts": "[1.1.0, )"
         }
       }
     },

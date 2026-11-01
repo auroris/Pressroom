@@ -1,9 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <Import Project="../../build/ClientPackage.props" />
   <PropertyGroup>
+    <PackageId>AurorisNet.Pressroom.Client</PackageId>
     <Description>HTTP client for Pressroom. Does not install or depend on Playwright.</Description>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeContractsInPackage</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificDebugSymbolsInPackage>$(TargetsForTfmSpecificDebugSymbolsInPackage);IncludeContractsSymbolsInPackage</TargetsForTfmSpecificDebugSymbolsInPackage>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
+    <!-- Contracts ships inside this package instead of as a NuGet dependency. -->
+    <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" PrivateAssets="All" />
   </ItemGroup>
+  <!-- Use the built copy-local outputs so packing with NoBuild never rebuilds references. -->
+  <Target Name="IncludeContractsInPackage">
+    <ItemGroup>
+      <BuildOutputInPackage Include="$(TargetDir)Pressroom.Contracts.dll" />
+    </ItemGroup>
+  </Target>
+  <Target Name="IncludeContractsSymbolsInPackage">
+    <ItemGroup>
+      <TfmSpecificDebugSymbolsFile Include="$(TargetDir)Pressroom.Contracts.pdb">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
+    </ItemGroup>
+  </Target>
 </Project>

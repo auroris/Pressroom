@@ -1,15 +1,21 @@
-# Pressroom.Client
+# AurorisNet.Pressroom.Client
 
 HTTP client for the Pressroom HTML-to-PDF service, for .NET 8 and .NET 10.
-Uses `Pressroom.Contracts` and the framework's HTTP APIs to call a running server.
+Includes both the `Pressroom.Client` and `Pressroom.Contracts` assemblies and uses
+the framework's HTTP APIs to call a running server. No browser dependencies.
 
-Download and extract `nuget-packages` from the GitHub **Packages** workflow, or
-download both Client and Contracts `.nupkg` files from a GitHub release. Keep them
-together in a local feed directory; these builds are not published to NuGet.org.
+For versions published to NuGet.org:
 
 ```sh
-dotnet add package Pressroom.Client --version <version> --source ./packages
+dotnet add package AurorisNet.Pressroom.Client --version <version>
 ```
+
+For builds distributed through GitHub, download and extract `nuget-packages` from
+the **Packages** workflow, or download `AurorisNet.Pressroom.Client.<version>.nupkg`
+from a release into a local feed directory. Add `--source ./packages` to the
+command above. A separate Contracts package is not needed. When migrating from
+the old packages, remove the `Pressroom.Client` and `Pressroom.Contracts` package
+references; the C# namespaces stay the same.
 
 ```csharp
 using Pressroom.Client;

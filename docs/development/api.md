@@ -12,9 +12,9 @@ see [Returning the PDF to a browser](client.md#returning-the-pdf-to-a-browser).
 
 The `disposition` request property and job field have been removed, along with
 `PdfDisposition` and the .NET request/result `Disposition` properties. Remove
-the field from render and job submissions and update the client and contracts
-packages together with the server. Requests that still send it return 400, even
-for `"inline"` or `"attachment"`. Move that choice into the application's browser
+the field from render and job submissions and update the `AurorisNet.Pressroom.Client`
+package (including contracts) together with the server. Requests that still send
+it return 400, even for `"inline"` or `"attachment"`. Move that choice into the application's browser
 response. Existing stored jobs remain readable; recovery ignores their legacy
 field without exposing it in job responses.
 

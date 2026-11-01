@@ -16,6 +16,10 @@ on:
         description: Also attach all verified packages to a GitHub release
         type: boolean
         default: false
+      publish_nuget:
+        description: Also publish AurorisNet.Pressroom.Client to NuGet.org
+        type: boolean
+        default: false
       prerelease:
         description: If creating a release, mark it as a prerelease (automatic for suffixed versions)
         type: boolean
@@ -67,6 +71,14 @@ jobs:
           # newer NuGet release, so one release carries one Chromium and rebuilds from the commit.
           $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version pinned
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
+      - name: Validate NuGet publishing configuration
+        if: ${{ inputs.publish_nuget }}
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_USER)) {
+            throw 'Set the NUGET_USER repository variable to your NuGet.org profile username and configure Trusted Publishing before selecting publish_nuget.'
+          }
 
   build:
     name: Package Windows x64 for IIS
@@ -137,7 +149,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows jobs browser tests failed.' }
 
   client:
-    name: Package the .NET client and contracts
+    name: Package the .NET client with bundled contracts
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -161,10 +173,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Client tests failed.' }
       - name: Pack
         run: |
-          foreach ($project in @('Pressroom.Contracts', 'Pressroom.Client')) {
-            dotnet pack "src/$project" -c Release --no-build --no-restore -o artifacts/nuget "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
-            if ($LASTEXITCODE -ne 0) { throw "Pack failed for $project." }
-          }
+          dotnet pack src/Pressroom.Client -c Release --no-build --no-restore -o artifacts/nuget "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
+          if ($LASTEXITCODE -ne 0) { throw 'Client pack failed.' }
       - name: Verify fresh consumers and checksum the packages
         run: |
           ./build/Test-ClientPackages.ps1 -BuildOnly -Feed artifacts/nuget -Version $env:RELEASE_VERSION
@@ -231,6 +241,48 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  publish-nuget:
+    name: Publish the .NET client to NuGet.org
+    needs: [validate, build, client, linux]
+    if: ${{ inputs.publish_nuget }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Download the verified client package and symbols
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name nuget-packages --dir artifacts/nuget
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the client package.' }
+          foreach ($extension in @('nupkg', 'snupkg')) {
+            $name = "AurorisNet.Pressroom.Client.$env:RELEASE_VERSION.$extension"
+            $path = Join-Path artifacts/nuget $name
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ((Get-Content -LiteralPath "$path.sha256" -Raw).Trim() -cne "$actual  $name") {
+              throw "Checksum mismatch for $name."
+            }
+          }
+      - name: Log in to NuGet.org with Trusted Publishing
+        id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Push the client package and symbols
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+          NUGET_SYMBOL_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+        run: |
+          # NuGet also pushes the matching .snupkg beside this package.
+          dotnet nuget push "artifacts/nuget/AurorisNet.Pressroom.Client.$env:RELEASE_VERSION.nupkg" --source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet.org publication failed. Inspect the package and symbols before retrying.' }
+          "Published AurorisNet.Pressroom.Client $env:RELEASE_VERSION and symbols to NuGet.org." >> $env:GITHUB_STEP_SUMMARY
+
   release:
     name: Attach all packages to a GitHub release
     needs: [validate, build, client, linux]
@@ -238,6 +290,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: write
     steps:
       - name: Download the verified packages from this run
@@ -266,7 +319,7 @@ jobs:
           }
 
           $checksums = @(Get-ChildItem artifacts/release -Filter '*.sha256' -File)
-          if ($checksums.Count -ne 6) { throw 'Expected checksums for both installers and four NuGet/symbol packages.' }
+          if ($checksums.Count -ne 4) { throw 'Expected checksums for both installers, the client NuGet package, and its symbols.' }
           foreach ($checksum in $checksums) {
             $name = $checksum.Name.Substring(0, $checksum.Name.Length - '.sha256'.Length)
             $archive = Join-Path artifacts/release $name
@@ -279,7 +332,7 @@ jobs:
 
           - Windows x64 framework-dependent ZIP for IIS or local hosting. Requires .NET 10 and the Hosting Bundle for IIS.
           - Linux x64 framework-dependent tarball. Requires the .NET 10 ASP.NET Core runtime and the documented native libraries, fonts and sandbox policy. Run under an unprivileged user; Docker is not required on the deployment host.
-          - Pressroom.Client and Pressroom.Contracts NuGet packages and symbols for .NET 8 and .NET 10, distributed only through GitHub.
+          - AurorisNet.Pressroom.Client NuGet package and symbols for .NET 8 and .NET 10, including the contracts assembly.
 
           The server packages differ because they contain platform-specific apphosts, private Node/Playwright drivers and Chromium. Each includes fonts, deployment documentation, and a file-hash manifest. Keep configuration outside the extracted release directory and verify the accompanying SHA-256 files.
 

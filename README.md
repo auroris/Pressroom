@@ -112,8 +112,10 @@ curl -sS -X POST http://localhost:5177/v1/render \
 ```
 
 Any HTTP client can call the API. The running service publishes its contract at
-`/openapi/v1.json`, and each release also attaches `Pressroom.Client`, an
-HTTP-only .NET package for .NET 8 and .NET 10.
+`/openapi/v1.json`, and each release also attaches `AurorisNet.Pressroom.Client`, an
+HTTP-only .NET package for .NET 8 and .NET 10 that includes the contracts assembly.
+The Packages workflow can optionally publish it to NuGet.org. See the
+[client installation guide](docs/development/client.md#installing-the-package).
 
 The [Getting started guide](docs/getting-started.md) walks through each step, and
 the [Deployment guide](docs/deployment.md) covers the production IIS setup.

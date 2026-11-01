@@ -2,18 +2,18 @@
 
 Request and response contracts for the Pressroom HTML-to-PDF API, for .NET 8 and
 .NET 10. Includes `RenderRequest`, page and readiness options, `IPdfRenderer`,
-`PdfRenderResult`, job records, `RequestValidator`, and `JsonDefaults`. The package
+`PdfRenderResult`, job records, `RequestValidator`, and `JsonDefaults`. The project
 uses the .NET base class library.
 
-Download both `Pressroom.Contracts` and `Pressroom.Client` `.nupkg` files from a
-GitHub release, or the `nuget-packages` artifact of the GitHub **Packages**
-workflow, into a local feed directory; these builds are not published to NuGet.org.
+This remains a separate source project shared by the client, server, and renderer.
+It is not published as a separate NuGet package: `AurorisNet.Pressroom.Client`
+bundles `Pressroom.Contracts.dll` for each supported framework.
 
 ```sh
-dotnet add package Pressroom.Contracts --version <version> --source ./packages
+dotnet add package AurorisNet.Pressroom.Client --version <version>
 ```
 
-Use `Pressroom.Client` to call a running service over HTTP. It includes this
-package transitively.
+The `Pressroom.Contracts` namespace is unchanged. See the
+[client README](../Pressroom.Client/README.md) for installation from GitHub builds.
 
 See the [API reference](https://github.com/auroris/Pressroom/blob/main/docs/development/api.md).

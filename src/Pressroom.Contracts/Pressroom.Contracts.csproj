@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <Import Project="../../build/ClientPackage.props" />
   <PropertyGroup>
+    <IsPackable>false</IsPackable>
     <Description>Pressroom HTML-to-PDF API contracts. No browser dependencies.</Description>
   </PropertyGroup>
 </Project>
