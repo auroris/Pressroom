@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -335,9 +336,26 @@ public sealed class JobStoreTests : IDisposable
         var coordinator = new RenderCoordinator(renderer, Options.Create(new RenderSettings()));
         using var scheduler = new JobScheduler(restored, coordinator, new FakePrintService(), Options.Create(_settings), NullLogger<JobScheduler>.Instance);
         await scheduler.StartAsync(TestContext.Current.CancellationToken);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (restored.Capacity.Queued + restored.Capacity.Rendering != 0) await Task.Delay(25, timeout.Token);
-        await scheduler.StopAsync(TestContext.Current.CancellationToken);
+        // Every recovered job commits several flushed disk writes. Allow slower CI disks while
+        // keeping a bounded wait and useful diagnostics if recovery actually stalls.
+        var recoveryTimeout = TimeSpan.FromMinutes(2);
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
+            while (true)
+            {
+                var capacity = restored.Capacity;
+                if (capacity.Queued + capacity.Rendering == 0) break;
+                Assert.True(elapsed.Elapsed < recoveryTimeout,
+                    $"Restart recovery did not finish within {recoveryTimeout}: {capacity.Queued} queued, {capacity.Rendering} rendering, {renderer.Calls} render calls.");
+                await Task.Delay(25, TestContext.Current.CancellationToken);
+            }
+        }
+        finally
+        {
+            // Await shutdown even on timeout/cancellation before disposing the store and its files.
+            await scheduler.StopAsync(CancellationToken.None);
+        }
         Assert.Equal(100, renderer.Calls);
         Assert.Equal(100, restored.List("a", JobStatus.Succeeded, 100, null).Items.Count);
         var failure = Assert.Single(restored.List("a", JobStatus.Failed, 100, null).Items);
