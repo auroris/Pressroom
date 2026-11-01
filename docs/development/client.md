@@ -1,10 +1,9 @@
 # .NET client
 
-`Pressroom.Client` is a small HTTP client for .NET 8 and .NET 10 applications. It depends only
-on `Pressroom.Contracts` and the base class library, so referencing it adds no
-Playwright or Chromium dependency to your application. Any HTTP client in any
-language can call the [API](api.md) directly; this library saves you the request
-plumbing, validation, and error mapping.
+`Pressroom.Client` handles HTTP requests, validation, streaming and error mapping
+for .NET 8 and .NET 10 applications. It uses `Pressroom.Contracts` and the .NET base
+class library to call a running Pressroom service. Applications in other languages
+can use any HTTP client to call the [API](api.md).
 
 ## Installing the package
 
@@ -42,7 +41,7 @@ builder.Services.AddHttpClient<PressroomClient>(http =>
 ```
 
 Omit the header when the server runs in anonymous mode. Store the URL and key in
-your application's configuration, not in code.
+your application's configuration.
 
 ## Rendering a PDF
 
@@ -72,19 +71,18 @@ await using PdfRenderResult result = await pressroom.RenderStreamAsync(request, 
 await result.PdfStream.CopyToAsync(destination, cancellationToken);
 ```
 
-`PressroomClient` also implements `IPdfRenderer`, whose
-`RenderAsync(string html, RenderOptions options, CancellationToken)` is the
-streaming form for code that should not depend on the HTTP client type.
+Callers using the `IPdfRenderer` interface can stream through
+`RenderAsync(string html, RenderOptions options, CancellationToken)`.
 
 The client validates the request locally with the same rules as the server and
-throws `ArgumentException` before sending anything invalid, so a typo in a unit or
-an impossible margin is caught in your tests rather than on the wire.
+throws `ArgumentException` for invalid values before sending a request. Your tests
+can catch a misspelt unit or a margin that leaves an empty printable area.
 
 ## Returning the PDF to a browser
 
 A web application chooses how to deliver the PDF using its own response headers.
-Pressroom returns bytes and a sanitized filename; it has no browser delivery
-setting. For a download, use the framework's file API:
+Pressroom returns bytes and a sanitized filename. For a download, use the
+framework's file API:
 
 ```csharp
 // ASP.NET Core MVC
@@ -122,8 +120,9 @@ PrintJobResult job = await pressroom.PrintAsync(new RenderRequest
 // job.JobId, job.Printer, job.Status == "submitted", job.PageCount
 ```
 
-The client never retries a print job. See [Printing](../printing.md) for what
-`submitted` does and does not mean.
+The calling application decides whether to retry a print submission. Check the
+Windows or CUPS queue first, because the original request may already have reached
+the spooler. See [Printing](../printing.md) for receipt semantics and retry handling.
 
 ## Batch rendering
 
@@ -192,8 +191,8 @@ catch (PressroomException ex) when (ex.StatusCode == HttpStatusCode.Unprocessabl
 }
 ```
 
-The client does not retry automatically; the policy belongs to you because only you
-know whether a late PDF is still useful. Sensible defaults:
+Configure retries in the calling application, with a total deadline suited to the
+document's purpose. Suggested policy:
 
 - Retry 429 and 503 once after `RetryAfter`, with a bounded total wait.
 - Do not retry 400, 401, 413, 422, or 504.
@@ -201,17 +200,15 @@ know whether a late PDF is still useful. Sensible defaults:
 
 Many applications keep an **HTML fallback**: when no Pressroom URL is configured,
 or a render fails, deliver the same HTML to the browser and let the user print it.
-A health probe before every render is unnecessary; `IsReadyAsync` exists for
-dashboards and startup checks, but the render call itself is the most reliable
-signal.
+Use the render's response or connection error to choose that fallback.
+`IsReadyAsync` supports dashboards and startup checks.
 
 ## Local development
 
-Pressroom runs happily on `localhost`. Point `Pressroom:Url` at a local console run
+Point `Pressroom:Url` at a local console run on `localhost`
 (see [Getting started](../getting-started.md#4-run-it)) and keep a separate key or
 anonymous mode for development.
 
-Applications that must render without any server can reference
-`Pressroom.Rendering` directly and host the browser themselves. That is a separate,
-explicit choice with its own browser setup; it is not an automatic fallback in the
-HTTP client.
+Applications can also host rendering in their own process by referencing
+`Pressroom.Rendering` and provisioning its browser. Select this integration
+explicitly; the HTTP client calls the configured server.

@@ -2,10 +2,9 @@
 
 Direct Linux is suitable for internet-facing or intranet use when Pressroom runs
 under a dedicated unprivileged user. Use API-key authentication and put an HTTPS
-reverse proxy in front of the loopback-bound service. An unprivileged identity does
-not itself block outbound connections; host egress restrictions are a separate
-optional deployment setting, and the [Linux container](container.md) documents a
-tested recipe for them.
+reverse proxy in front of the loopback-bound service. Configure host network
+policy separately when the deployment needs outbound restrictions. The
+[Linux container](container.md) documents a tested recipe.
 
 Pressroom supports Linux x64 with the .NET 10 ASP.NET Core runtime and Chromium's
 sandbox enabled. Optional [printing](printing.md) uses CUPS `lp` or `lpr` and an
@@ -15,9 +14,8 @@ explicit printer allowlist. Record target-host qualification with the
 ## Prerequisites
 
 Use Ubuntu 24.04 LTS or Debian 13, x64, a kernel with pidfd support (5.4 or later),
-and an unprivileged service identity. Ubuntu 26.04 has also been exercised. Install
-the .NET 10 ASP.NET Core runtime. Chromium also needs shared libraries; the runtime
-alone and fonts are insufficient. On Ubuntu 24.04:
+and an unprivileged service identity. Install
+the .NET 10 ASP.NET Core runtime and Chromium's shared libraries. On Ubuntu 24.04:
 
 ```sh
 sudo apt-get install libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
@@ -30,11 +28,11 @@ sudo apt-get install libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
 This is the Chromium dependency list published by the bundled Playwright release.
 Debian 13 uses the same package names. Keep fontconfig and Noto: headers and
 footers use system fallback fonts; main documents use the packaged faces. The
-package never installs dependencies at startup or skips host validation.
+service validates the installed dependencies at startup.
 
 ## Sandbox
 
-The headless shell uses unprivileged user namespaces; it has no SUID helper.
+The headless shell uses unprivileged user namespaces for its sandbox.
 Permit `user.max_user_namespaces` greater than zero and, where present,
 `kernel.unprivileged_userns_clone=1`. Ubuntu's AppArmor policy must also permit
 the installed Chromium executable to create user namespaces. Install an
@@ -43,7 +41,7 @@ headless-shell path. Containers need the supplied seccomp profile too. Never
 disable Chromium's sandbox to work around host policy.
 
 For the versioned installation layout below, this `/etc/apparmor.d/pressroom-browser`
-profile grants user namespaces to that executable path without disabling Ubuntu's
+profile grants user namespaces to that executable path while retaining Ubuntu's
 global `kernel.apparmor_restrict_unprivileged_userns` setting:
 
 ```text

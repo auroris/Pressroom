@@ -9,8 +9,8 @@ recycling for the local job store: stop the old worker before its replacement
 starts, or the store lock rejects the second instance.
 
 A Pressroom release is one folder. Deploying it means provisioning IIS once, then
-copying the folder into place for every update. The application never downloads
-browsers, restores packages, or installs Windows features at run time.
+copying the folder into place for every update. The release contains the renderer,
+its runtime dependencies, and the fonts needed for document output.
 
 ## Server prerequisites
 
@@ -20,7 +20,6 @@ browsers, restores packages, or installs Windows features at run time.
 | IIS with the **.NET 10 Hosting Bundle** | The bundle supplies the ASP.NET Core module. A runtime or SDK alone is not enough, and the module is required even for the self-contained profile |
 | .NET 10 runtime | Installed by the Hosting Bundle. A later major runtime alone does not satisfy a `net10.0` application |
 | Application Initialization | Optional IIS feature that keeps the renderer warm |
-| Nothing else | No Node, npm, Chrome, Edge, PowerShell 7, Visual C++ redistributable, Media Foundation, or font installation |
 
 ([Hosting Bundle](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0),
 [runtime selection](https://learn.microsoft.com/en-us/dotnet/core/versions/selection),
@@ -60,8 +59,8 @@ Keep everything that changes at run time outside the replaceable release folder:
 
 Create the state root, `temp`, and `logs` before the first start and grant these
 rights to the dedicated pool identity, such as `IIS AppPool\Pressroom`. Restrict
-the settings file to that identity and administrators. Grant ACLs per directory
-rather than blanket modify rights on the release or configuration tree.
+the settings file to that identity and administrators. Apply the permissions in
+the table to each directory.
 
 Write the settings file as described in [Configuration](configuration.md): at
 minimum `Paths:StateRoot` and either API keys or explicit anonymous mode.
@@ -85,8 +84,7 @@ application pool:
 | Site binding | HTTPS with your existing certificate |
 
 IIS Anonymous Authentication lets requests reach the application, which then
-enforces its own API-key or anonymous access mode. Pressroom does not use Windows
-authentication.
+enforces its own API-key or anonymous access mode.
 
 Request limits: IIS request filtering and the ASP.NET Core server accept bodies up
 to 32 MiB; the application enforces its 25 MiB cap before deserialization. Raising
@@ -117,8 +115,8 @@ rollback, and a soak run.
 
 ## Updating
 
-Updates are a brief maintenance deployment: stop, copy, start. There is no database
-and no migration.
+Update during a brief maintenance window: stop the application, replace the release
+folder, and start it again.
 
 1. Stage and verify the new release elsewhere on the server (checksum, extract,
    `--check`). Keep the previous release folder for rollback.
@@ -141,7 +139,9 @@ Stop the pool, restore the previous complete release folder, start, and repeat t
 health, version, and smoke checks. The browser, driver, fonts, and application
 always roll back together because they ship as one folder.
 
-## Running without IIS
+<a id="running-without-iis"></a>
+
+## Running with Kestrel
 
 The executable hosts itself on Kestrel for local use and checks:
 

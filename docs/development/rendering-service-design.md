@@ -1,6 +1,6 @@
 # Pressroom: HTML-to-PDF rendering service
 
-Status: design baseline, revised 2026-10-24. Publishing is integrated into Visual Studio; see [the Developing guide](developing.md) for the implemented workflow. Windows/IIS acceptance testing has not yet been performed.
+Status: historical design baseline, revised 2026-10-24. See [the Developing guide](developing.md) for the implemented workflow and the [Windows / IIS acceptance checklist](../windows-acceptance.md) for deployment qualification.
 
 Pressroom provides HTML-to-PDF rendering as a standalone service. Any application that can produce a self-contained HTML document can submit it and receive a PDF. Calling applications remain responsible for their templates and access checks.
 
@@ -10,33 +10,33 @@ Pressroom provides HTML-to-PDF rendering as a standalone service. Any applicatio
 - One centrally maintained rendering engine and font package per environment.
 - Paper output: page sizes, margins, page breaks, running headers and footers with page numbers, tagged PDF, and document outlines.
 - One deployable ASP.NET Core application. A production release is a complete Windows x64 folder, ready to copy into an already provisioned IIS application.
-- Routine upgrades consist of stopping the application, copying the release, and starting it. The production application does not download browsers, restore packages, compile assets, or install machine components.
-- Qualify the standard PDF workload without an additional machine-wide Visual C++ Redistributable installation or the Windows Media Foundation feature. Bundle redistributable native dependencies if the selected executables actually require them. This is a release acceptance objective, not yet a demonstrated Windows runtime result.
+- Routine upgrades consist of stopping the application, copying the complete release, and starting it. Build and packaging supply the browser, dependencies and compiled assets.
+- Qualify the standard PDF workload without an additional machine-wide Visual C++ Redistributable installation or the Windows Media Foundation feature. Bundle redistributable native dependencies if the selected executables require them, and verify the package through the release acceptance checks.
 
-Non-goals for version 1: arbitrary URL rendering, remote asset fetching, document storage, HTML authoring or templating, Word conversion, asynchronous jobs with callbacks, PDF/A, signatures, or PDF merging. The baseline requires no database, message broker, container runtime, or separately installed worker service.
+Version 1 covers synchronous rendering of self-contained HTML, with request state held in memory and rendering hosted inside the application. Callers prepare templates and embedded resources. [Later work](#11-later) covers additional formats and workflows.
 
 ## 2. Architecture
 
 ASP.NET Core 10 minimal API, stateless, with Serilog and an OpenAPI document at `/openapi/v1.json`. IIS in-process hosting is the primary deployment. Running the same host on Kestrel, including as an explicitly installed Windows service, remains an alternative.
 
-Playwright for .NET owns one headless Chromium browser instance per application instance. Chromium and Playwright have child processes; “one application” does not mean one operating-system process. Each render receives a fresh nonpersistent browser context, disposed when the request ends. No context, cookie jar, or browser storage is reused between callers.
+Playwright for .NET owns one headless Chromium browser instance and its child processes per application instance. Each render receives its own browser context, cookies and storage. The context is disposed when the request ends.
 
-The rendering queue is memory-only and bounded. Start with `Render:Concurrency = 2` and `Render:QueueLimit = 8`; these are conservative design defaults, to be tuned against representative documents and the server's memory budget. CPU count alone is not a capacity estimate. Admission must bound requests being read/validated as well as queued and active renders, so a burst cannot allocate unlimited HTML bodies before reaching the queue.
+The rendering queue is bounded and held in memory. Start with `Render:Concurrency = 2` and `Render:QueueLimit = 8`, then tune against representative documents and the server's memory budget. Admission must limit requests during reading and validation as well as queued and active renders, keeping HTML allocations within the capacity budget.
 
-An application-owned browser supervisor starts Chromium, performs a warm-up render, tracks health, and coordinates restart and shutdown. Planned recycling after 500 completed render attempts drains active contexts before replacing the browser. A crash fails affected requests and starts a bounded recovery attempt; the process must not create competing replacement browsers.
+An application-owned browser supervisor starts Chromium, performs a warm-up render, tracks health, and coordinates restart and shutdown. Planned recycling after 500 completed render attempts drains active contexts before replacing the browser. A crash fails affected requests and starts one coordinated, bounded recovery attempt.
 
-Multiple instances have independent queues and browser owners. Callers can use a conventional load balancer with the same access policy configured on each instance. There is no durable job recovery in v1.
+Multiple instances have independent queues and browser owners. Callers can use a conventional load balancer with the same access policy configured on each instance. After an instance stops, callers decide whether to resubmit interrupted requests.
 
 ### Project boundaries
 
 | Project | Responsibility |
 |---|---|
 | `Pressroom.Contracts` | Request/response models and shared validation concepts |
-| `Pressroom.Client` | HTTP client and authentication configuration; no Playwright dependency |
+| `Pressroom.Client` | HTTP requests, response handling and authentication configuration |
 | `Pressroom.Rendering` | Playwright adapter, browser lifecycle, font resources, PDF inspection |
 | `Pressroom.Server` | API, admission, authentication, logging, health, hosting |
 
-The server publishes as one folder. A developer who explicitly selects local rendering references the rendering component separately; ordinary HTTP clients do not acquire Chromium or its driver transitively.
+The server publishes as one folder with its rendering dependencies. HTTP clients call that server. Applications can also reference `Pressroom.Rendering` to host rendering locally and provision the browser themselves.
 
 ## 3. API contract
 
@@ -70,21 +70,21 @@ Request: UTF-8 `application/json` containing a complete document. Request compre
 }
 ```
 
-`html` is required. Omitted `fileName` becomes `document.pdf`; sanitize supplied names for `Content-Disposition` and use a framework response API rather than assembling the header manually. The sample filename is illustrative, not a fixed default.
+`html` is required. Omitted `fileName` becomes `document.pdf`. Sanitize supplied names for `Content-Disposition` and set the header through a framework response API.
 
-Pressroom returns `application/pdf` with a fixed `Content-Disposition: attachment` header carrying the sanitized suggested filename. The calling application chooses display or download when serving those bytes to its browser. There is no per-request browser delivery setting in Pressroom.
+Pressroom returns `application/pdf` with a fixed `Content-Disposition: attachment` header carrying the sanitized suggested filename. The calling application chooses display or download when serving those bytes to its browser.
 
 `pageSize` accepts `Letter`, `Legal`, `Tabloid`, `A3`, `A4`, or `A5`, or an object such as `{ "width": "8.5in", "height": "11in" }`. `preferCssPageSize` allows CSS `@page` dimensions to take precedence. Validate dimensions, margins, scale, locale, time zone, timeout bounds, and unknown properties before opening a browser context.
 
 Headers and footers use Chromium's `date`, `title`, `url`, `pageNumber`, and `totalPages` substitutions. They require their own styles and font handling; page CSS is not inherited and their scripts are not executed. `tagged` requests structural tagging; it is not a declaration of PDF/UA conformance. See the [Playwright PDF API][pw-pdf].
 
-The API key determines JavaScript permission. An authenticated key with `AllowJavaScript: true` enables scripts automatically; the request needs no JavaScript flag. The request's `javaScript` option defaults to `true` and may opt out with `false`. Effective JavaScript is the key permission AND that option: a key without permission or an anonymous caller always renders with scripts disabled, even if the request says `true`. Existing script-dependent callers need only their key opted in.
+The API key determines JavaScript permission. An authenticated key with `AllowJavaScript: true` enables scripts automatically. The request's `javaScript` option defaults to `true` and may opt out with `false`. Effective JavaScript is the key permission AND that option: a key without permission or an anonymous caller always renders with scripts disabled, even if the request says `true`.
 
-Readiness defaults to no caller-supplied condition. A chart document with JavaScript enabled can opt into `function: "window.readyToPrint === true"`. If several conditions are supplied, all must complete within one readiness budget; a delay is not an additional unbounded wait. A JavaScript readiness expression returns 400 when effective JavaScript is disabled, whether by key permission or the request option. Wait for required fonts before printing, within the remaining overall deadline.
+By default, printing proceeds when the document and required fonts are ready. A chart document with JavaScript enabled can add `function: "window.readyToPrint === true"`. All supplied conditions, including a delay, share one readiness budget within the overall deadline. A JavaScript readiness expression returns 400 when effective JavaScript is disabled, whether by key permission or the request option.
 
-The overall `timeoutMs` covers admitted request processing, queue waiting, document loading, readiness, PDF generation, and page counting. It does not reset between stages and does not include sending the completed PDF over a slow client connection. Until options are parsed, use the server maximum as the admission deadline, then shorten it using the original admission timestamp. HTTP body-read and connection protections remain host responsibilities.
+The overall `timeoutMs` covers admitted request processing, queue waiting, document loading, readiness, PDF generation, and page counting with one shared deadline. Response transmission has a separate lifetime. Until options are parsed, use the server maximum as the admission deadline, then shorten it using the original admission timestamp. HTTP body-read and connection protections remain host responsibilities.
 
-`Render:MaxBodyBytes` means the entire encoded UTF-8 JSON body, including templates and escaped HTML, not just the decoded `html` string. Default: 26,214,400 bytes (25 MiB).
+`Render:MaxBodyBytes` limits the entire encoded UTF-8 JSON body, including templates and escaped HTML. Default: 26,214,400 bytes (25 MiB).
 
 | Status | Meaning | Body / headers |
 |---|---|---|
@@ -102,7 +102,7 @@ Native IIS rejection, a lost connection, or forced process termination cannot be
 
 ### `GET /v1/health`
 
-Readiness: 200 only after a successful warm-up and while the browser is available; 503 during startup, replacement, failure, or shutdown. Queue saturation alone is not unhealthy; the render endpoint uses 429. Return a minimal status suitable for an anonymous IIS warm-up/health request. Put detailed versions and operational counters in `/v1/info`, which follows the configured access mode.
+Readiness: 200 after a successful warm-up while the browser is available; 503 during startup, replacement, failure, or shutdown. Readiness stays healthy during queue saturation, when the render endpoint uses 429. Return a minimal status suitable for an anonymous IIS warm-up/health request. Put detailed versions and operational counters in `/v1/info`, which follows the configured access mode.
 
 ### `GET /v1/info`
 
@@ -114,27 +114,29 @@ The OpenAPI document follows the same configured access mode as rendering and se
 
 ### Self-contained documents
 
-Styles are inline or in `<style>`. Resource URLs, including images and caller-supplied fonts, must use `data:`; `blob:`, network and local-file resource URLs are rejected. V1 does not expose a URL-rendering endpoint. The renderer fulfills exactly one private main-document navigation directly from memory, with response headers applied before parsing. It never fetches that bootstrap URL. A header-delivered CSP allows inline styles and data resources, denies workers, objects, forms and base URLs, and applies a sandbox without same-origin or popup privileges. Renders with effective JavaScript disabled use `script-src 'none'` and no `allow-scripts`; enabled renders allow inline and data scripts and add `allow-scripts`. Local child documents inherit these restrictions. Header/footer templates receive their own resource CSP before caller markup. Main-document navigation away from the submitted document closes the page.
+Styles are inline or in `<style>`. Resource URLs, including images and caller-supplied fonts, must use `data:`; `blob:`, network and local-file resource URLs are rejected. The renderer fulfills one private main-document navigation directly from memory, with response headers applied before parsing.
+
+A header-delivered CSP allows inline styles and data resources, denies workers, objects, forms and base URLs, and applies a sandbox without same-origin or popup privileges. Renders with effective JavaScript disabled use `script-src 'none'` and no `allow-scripts`; enabled renders allow inline and data scripts and add `allow-scripts`. Local child documents inherit these restrictions. Header/footer templates receive their own resource CSP before caller markup. Main-document navigation away from the submitted document closes the page.
 
 Install context-wide request interception and WebSocket rejection before creating pages, set offline mode and `ServiceWorkers = Block`. These controls alone do not block WebRTC. An empty `Connection-Allowlist` response header blocks document-initiated network connections, including WebRTC, WebTransport, DNS prefetch and preconnect. See the [Connection Allowlists specification](https://wicg.github.io/connection-allowlists/) and [Chromium implementation design](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/connection_allowlist_design.md). Warm-up verifies enforcement using a local `ReportingObserver` and an RTC constructor, without gathering ICE candidates or contacting an external server. No reporting endpoint is configured. A missing enforcement report fails startup, so an incompatible executable override cannot silently weaken the sandbox.
 
 Integration tests cover navigations, subframes, popups, scripts, CSS imports, images, fetch/XHR, blob resources, WebRTC UDP/STUN and TCP/TURN, and temporary local marker files. Record observed blocked-resource counts, not raw URLs or browser diagnostics. CSP can block before routing, and browser policy reports are not a complete audit counter. Ordinary blocked resources remain missing; a blocked action can throw a script exception or invalidate printing and yield a document error. The pinned Chromium can crash a render when RTC is constructed inside a `srcdoc` or blank child frame under the connection policy; tests require no egress and successful subsequent rendering. [Playwright documents separate service-worker and WebSocket considerations][pw-context].
 
-These are browser/application controls, not proof of OS-wide network isolation or protection against a browser exploit. A deployment requiring a strict no-egress guarantee needs an independently enforced and tested network policy. Caller documents cannot read host files through resource URLs or use origin-backed filesystem/storage APIs in the opaque sandbox. The browser still reads its own binaries/fonts and creates private temporary files. JavaScript may use memory within its request context; it has no state shared with another render. Disabling JavaScript does not replace the other controls.
+These browser and application controls restrict document resources and isolate each render's state. Enforce strict outbound restrictions through an independently tested host network policy, and keep the browser updated and host isolated to limit exposure to exploits. The opaque sandbox blocks document access to host-file URLs and origin-backed storage APIs. Chromium reads its own binaries and fonts and creates private temporary files. Apply the same isolation controls to renders with JavaScript enabled or disabled.
 
-Reject `<base>` elements during HTML validation rather than assuming Chromium ignores them. Relative URLs must not create an alternative asset-fetching path. This does not turn the renderer into a general HTML sanitizer.
+Reject `<base>` elements during HTML validation to close the relative-URL asset-fetching path. General HTML sanitisation remains the calling application's responsibility.
 
 ### Fonts
 
-The standard package includes a small font set licensed for redistribution, with a manifest of family names, weights, styles, and files. Load those resources from the release and supply data-backed `@font-face` rules to documents that use the packaged families. An arbitrary `fonts` directory does not automatically register fonts with Windows or Chromium. [CSS defines how font-face resources are selected][css-fonts].
+The standard package includes fonts licensed for redistribution, with a manifest of family names, weights, styles, and files. Load those resources from the release and supply data-backed `@font-face` rules to documents that use the packaged families. [CSS defines how font-face resources are selected][css-fonts].
 
 Callers can embed additional fonts themselves. Host-installed fonts remain optional compatibility support, not a prerequisite for the standard acceptance documents. The initial implementation bundles Noto Sans Regular, Bold, Italic, and Bold Italic with the SIL OFL license and file hashes. Real Chromium tests verify those faces in main-document PDF text; Windows/IIS qualification is still required.
 
-Header/footer templates require separate styling and acceptance tests. Custom embedded header/footer fonts are unsupported in the initial build: an independent data-backed Noto Sans rule still fell back to a system font in the real Chromium 156 Linux footer test. Use generic footer typography and verify its appearance on Windows; do not assume main-document embedding covers it. Wait for `document.fonts.ready` for the main document within the render deadline. [Font readiness is specified by the CSS Font Loading API][css-font-loading].
+Header/footer templates require separate styling and acceptance tests. The initial build uses system fallback fonts in these templates. Use generic footer typography and verify its appearance on Windows. Wait for `document.fonts.ready` for the main document within the render deadline. [Font readiness is specified by the CSS Font Loading API][css-font-loading].
 
 ### Retention and logging
 
-Pressroom does not deliberately persist input HTML or generated PDF documents. Use nonpersistent contexts, set `AcceptDownloads = false`, leave `PdfAsync`'s output path unset, and disable tracing, HAR, video, and document screenshots in normal production operation. Chromium's temporary profile/artifact files and operating-system paging mean this is not a blanket zero-disk-write guarantee. [Browser options][pw-browser] and [browser launch implementation][pw-launch-source] explain those separate mechanisms.
+Process input HTML and generated PDF bytes in memory. Use nonpersistent contexts, set `AcceptDownloads = false`, leave `PdfAsync`'s output path unset, and disable tracing, HAR, video, and document screenshots in normal production operation. Chromium may still create temporary profile and artifact files, and the operating system may page memory. [Browser options][pw-browser] and [browser launch implementation][pw-launch-source] explain those mechanisms.
 
 Serilog records request identifiers, caller names/key identifiers, sizes, timings, page counts, outcomes, and bounded resource-block counts. Raw HTML, PDF bytes, API keys, full blocked URLs, and page console/error text must not enter server logs. Any page diagnostics returned to the caller are bounded and redacted separately. Diagnostic modes that retain documents are outside the normal v1 configuration.
 
@@ -150,7 +152,7 @@ Under IIS, enable Anonymous Authentication and disable Windows Authentication. A
 
 Run under a dedicated application-pool identity with access only to the required release and runtime locations. Set `ChromiumSandbox = true` explicitly and verify launch under that identity; Playwright's default is false. A launch failure must produce a clear startup error, not silently disable sandboxing. `--no-sandbox` is not a supported production workaround. [Launch options][pw-launch].
 
-Decision, 2026-10-24: retain Chromium's internal per-process sandbox and do not wrap its browser/broker in a custom Windows AppContainer. The prototype encountered both window-station access denial and denial of nested AppContainer-token creation. An outer AppContainer does not reproduce Chromium's complete set of per-process restrictions and mitigations. The discarded prototype is not part of the release. Whole-worker file and network restrictions remain separate deployment requirements; the current document controls do not establish an OS-level boundary.
+Chromium's internal sandbox supplies per-process restrictions and mitigations. Use host policy for whole-worker file and network restrictions; document controls operate inside the browser.
 
 Use HTTPS to protect API keys and document content in transit.
 
@@ -224,9 +226,9 @@ Microsoft supports app-local Visual C++ deployment. Use the official Redistribut
 
 Chromium's Windows media code delay-loads Media Foundation libraries and has a failure path that disables media functionality when they are absent. This supports testing PDF-only operation without Media Foundation; it does not prove every browser path is independent of it. Camera/microphone capture, media playback, and browser video recording are outside Pressroom v1's supported rendering workload. [Chromium media build][chromium-media-build]; [media initialization][chromium-mf-init].
 
-Keep normal Playwright dependency validation enabled. The inspected Windows checker examines normal PE imports; the headless shell's Media Foundation references are delayed imports. The broad Chromium `install-deps` group alone is therefore not evidence that PDF startup needs Media Foundation. [Windows checker][pw-winldd].
+Keep normal Playwright dependency validation enabled and qualify the PDF workload against the selected browser's dependencies. [Windows checker][pw-winldd].
 
-If future qualification encounters a demonstrable preflight false positive, `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1` is a diagnostic mechanism for separating validation failure from real launch/render failure. It is not needed by the present static findings and is not a standard Pressroom setting. Any later release that needs it must prove the exact PDF workload and retain real startup/warm-up checks. It does not change Windows DLL loading or make mandatory imports optional. [Maintainer explanation][pw-validation-override]; [Windows DLL loading][windows-dll-loading].
+If future qualification encounters a demonstrable preflight false positive, `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1` is a diagnostic mechanism for separating validation failure from real launch/render failure. It is not a standard Pressroom setting. Any later release that needs it must prove the exact PDF workload and retain real startup/warm-up checks. It does not change Windows DLL loading or make mandatory imports optional. [Maintainer explanation][pw-validation-override]; [Windows DLL loading][windows-dll-loading].
 
 If the selected stock renderer genuinely cannot pass without Media Foundation, record the exact failure before choosing a fallback. One-time feature provisioning is a separate deployment alternative outside the intended standard package, not a silent relaxation of its acceptance objective. Copying individual Media Foundation DLLs into the application directory is not an equivalent deployment. A custom Chromium build is a last resort because it creates an ongoing browser build/patch workload. Do not use unrelated sandbox/GPU switches as a substitute for proving the dependency behavior.
 
@@ -257,11 +259,11 @@ After build smoke tests, remove only Playwright's `DEPENDENCIES_VALIDATED` cache
 
 The standalone implementation supplies `IisFolder` and `IisFolderSelfContained` Visual Studio profiles. Pressroom.Server imports `Pressroom.Publish.targets`: during Publish it uses the matching private Node/driver to install `chromium --only-shell` into a build-owned bundle, adds the complete bundle to `ResolvedFileToPublish`, assembles an isolated local copy, and runs that copy's `--check` before deployment transfer. A failed warm-up fails Publish. Normal Build and unit tests do not acquire browsers.
 
-The default framework-dependent profile targets `net10.0`, `win-x64`, with single-file/trimming/AOT disabled. The project targets also apply to a Visual Studio IIS/Web Deploy profile configured for Windows x64. The automatic helper uses Windows PowerShell 5.1 already supplied with the Windows build environment; no separate PowerShell 7 or Node installation is required. Build support is invoked by Visual Studio, rather than by a separate operator deployment script.
+The default framework-dependent profile targets `net10.0`, `win-x64`, with single-file/trimming/AOT disabled. The project targets also apply to a Visual Studio IIS/Web Deploy profile configured for Windows x64. Visual Studio invokes the helper through the publish targets, using Windows PowerShell 5.1 and the package's private Node runtime.
 
 The publish helper copies supplied managed package notices, records versions and SHA-256 hashes, and removes only `DEPENDENCIES_VALIDATED` markers. It leaves `web.config` out of file hashes because the Web SDK transforms that file for the chosen profile after payload computation. Preserve `INSTALLATION_COMPLETE` and every installer-selected companion file.
 
-The production startup path never calls the installer. A successful publishing-machine check does not replace clean Windows/IIS qualification with the actual pool identity. See [the Developing guide](developing.md) for the current workflow and [the acceptance record](../windows-acceptance.md) for the release gate.
+Production startup uses the packaged dependencies. Qualify the release on a clean Windows/IIS host with the actual pool identity after the publishing-machine check. See [the Developing guide](developing.md) for the current workflow and [the acceptance record](../windows-acceptance.md) for the release gate.
 
 ### 8.3 Paths and startup
 
@@ -274,7 +276,7 @@ Example deployment layout:
 | `C:\ProgramData\Pressroom\temp\<instance-id>` | Instance-specific working area; app identity can create/modify/delete |
 | `C:\ProgramData\Pressroom\logs` | Bounded metadata logs; survives code replacement |
 
-Grant ACLs per directory, not blanket modification of the entire release or configuration tree. Resolve application resources using `AppContext.BaseDirectory`. Resolve and validate the runtime root explicitly; do not assume the current working directory or an interactive user's profile.
+Grant the listed ACLs per directory. Resolve application resources using `AppContext.BaseDirectory`, and resolve and validate the configured runtime root explicitly.
 
 Before `Playwright.CreateAsync()`, the application supplies process-scoped Playwright and temporary-directory settings from its file-based configuration. These internal environment variables are required by the driver and are not operator configuration. The Node driver creates temporary directories before launching the browser, so setting only browser launch environment options is too late. [Launch implementation][pw-launch-source].
 
@@ -311,17 +313,17 @@ Configure IIS request filtering and ASP.NET Core server body ceilings above the 
 6. Start the pool or remove the offline file. Request readiness, verify the expected release version, and perform an authenticated smoke render.
 7. Roll back by stopping, restoring the previous complete release, and rerunning those checks. Browser, driver, and application versions roll back together.
 
-This is a brief maintenance deployment, not zero-downtime live overwrite. No database migration is involved in the stateless baseline. Sources: [IIS deployment][iis-hosting], [ANCM offline handling][ancm], and [Robocopy][robocopy].
+Allow a brief maintenance window for the stop, copy and start sequence. Sources: [IIS deployment][iis-hosting], [ANCM offline handling][ancm], and [Robocopy][robocopy].
 
 ## 9. Client library and caller integration
 
-`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. The caller supplies a reusable HTTP client with a Pressroom base URL and API key from its configuration file; omit the key when using anonymous mode. The HTTP client project has no Playwright dependency.
+`IPdfRenderer.RenderAsync(string html, RenderOptions options, CancellationToken)` returns a disposable `PdfRenderResult` with the PDF stream, page count, filename, and render duration. `PressroomClient` implements this HTTP interface and also offers a `RenderRequest` convenience overload returning buffered bytes. The caller supplies a reusable HTTP client with a Pressroom base URL and API key from its configuration file; omit the key when using anonymous mode.
 
 The calling application owns browser delivery and sets its browser response's `Content-Disposition` using typed framework header/file APIs and the sanitized filename. Pressroom's response headers describe the transfer to the application; copying PDF bytes does not forward those headers to the browser.
 
-The caller owns its total deadline and retry policy. This implementation does not automatically retry; 429/503 responses retain `Retry-After` metadata so an explicit caller policy can choose bounded retries. A caller may instead deliver its HTML when a Pressroom URL is absent or Pressroom is unavailable. A render response/connection failure can drive that decision without a health probe before every call. Do not automatically retry validation/readiness failures or an overall render timeout.
+The caller sets its total deadline and retry policy. Use the `Retry-After` metadata on 429/503 responses to choose bounded retries. When Pressroom is unavailable or its URL is unset, the application can deliver its HTML for browser printing. Use the render response or connection failure to select that fallback. Validation/readiness failures and overall render timeouts require caller review before retrying.
 
-Pressroom itself remains usable on localhost for development and exposes only its rendering API/readiness behavior. Local rendering is a separate explicit use of `Pressroom.Rendering`, with its own browser setup; it is not an automatic fallback in the HTTP client or server. Direct local rendering has no API-key authorization and honors `RenderOptions.JavaScript`, which defaults to `true`; local callers can set it to `false`.
+Run Pressroom on localhost for development. For in-process rendering, reference `Pressroom.Rendering` explicitly and provision its browser. Local callers own authorization and set `RenderOptions.JavaScript`, which defaults to `true` and can be set to `false`.
 
 The calling application remains responsible for its templates, access checks, localization, and HTML fallback. Letter is the default page size; A4 and other sizes remain available per request.
 
@@ -351,52 +353,21 @@ Functional acceptance: the supplied bilingual sample renders as two Letter portr
 
 ## 11. Later
 
-Asynchronous batches/callbacks, PDF/A, signatures, merging, and a controlled asset-host allow-list remain future work. Word output through LibreOffice would introduce a separate packaging and operational decision; it is not part of v1's deployment promise.
+Asynchronous batches/callbacks, PDF/A, signatures, merging, and a controlled asset-host allow-list remain future work. Word output through LibreOffice would require a separate packaging and operational decision in a later version.
 
 ## 12. Decisions and implementation checkpoints
 
 - Pressroom is the product name. Chromium via Playwright remains the engine behind an implementation-independent contract.
 - IIS folder deployment is the primary operational target. The installed .NET 10 runtime is used by default; a separate self-contained profile is optional.
-- The release owns its matching driver, browser, and approved fonts. Server font installation and system Chrome/Edge are not baseline dependencies.
-- Prefer the stock headless shell, bundle any required redistributable DLLs, and test without Media Foundation before adding a Windows media-feature prerequisite. Keep Playwright's normal validation enabled; the current static findings do not establish a need for an override.
-- The service remains synchronous and stateless. Browser/application restarts do not create a need for a durable queue.
+- The release supplies its matching driver, browser, and approved fonts.
+- Prefer the stock headless shell, bundle any required redistributable DLLs, and test without Media Foundation before adding a Windows media-feature prerequisite. Keep Playwright's normal validation enabled.
+- The service remains synchronous and stateless, with callers deciding whether to resubmit interrupted requests after a restart.
 - External resource fetching stays outside v1. Strict OS egress isolation, if required by the environment, is separately provisioned and verified.
 - Before the first release, fix the supported Windows baseline, pin dependencies, select redistributable fonts, prove header/footer font behavior, and run the clean-IIS acceptance gate.
 
 ### Changes from the original design
 
 This revision adds the release/package layout, server prerequisites, runtime paths, IIS settings, deployment/rollback procedure, and clean-server acceptance gate. It also changes default readiness to `null`, uses an explicit initial concurrency of 2, defines the byte limit over the complete JSON body, adds overall-timeout behavior, separates saturation from readiness, coordinates browser recycling, and narrows the original no-network/no-disk claims to guarantees the implementation can substantiate.
-
-## 13. Native dependency investigation, 2026-10-23
-
-Static inspection covered the Windows browser and companion native tools corresponding to a candidate Microsoft.Playwright 1.64.1 release. Its [version properties][pw-version-props] identify driver 1.64.1 and Node 24.22.1; the driver [browser metadata][pw-browser-metadata] selects Chromium/Chrome Headless Shell 156.0.8078.4 (revision 1248), FFmpeg 1013, and Winldd 1007. The initial project pins Microsoft.Playwright 1.64.1. This static evidence is not a completed Windows/IIS test.
-
-The Playwright Chromium CDN download was unavailable in the research environment, so the corresponding exact-version headless archive from Google's official Chrome for Testing distribution was inspected. This is not a claim that a downloaded Playwright CDN archive was independently compared byte for byte. Node came from its official versioned Windows archive; FFmpeg and Winldd came from Microsoft's Playwright distribution.
-
-| Downloaded archive | Bytes | SHA-256 |
-|---|---:|---|
-| [Headless Shell 156.0.8078.4][inspected-headless-archive] | 123826519 | `5af4c82cf4b351ec4bad4c71dcf938af14fccea8a0eb0d5c2a7b49ccc922698c` |
-| [Node 24.22.1 x64][inspected-node-archive] | 37748064 | `d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5` |
-| [FFmpeg 1013][inspected-ffmpeg-archive] | 1663577 | `0c4ee6c694e9bffea27128ab543ae573466c5245d7d16c054e40115d7d743874` |
-| [Winldd 1007][inspected-winldd-archive] | 128684 | `0069f0d11d4ad6df068a068c003d22fe7dbec192a47bba64b2e115e9c8ce41d8` |
-
-- Method: inspect PE normal and delay-import tables for all eight EXE/DLL files; cross-check normal imports with `objdump -p`.
-- `chrome-headless-shell.exe` startup imports: `VERSION.dll`, `WINMM.dll`, `WS2_32.dll`, `KERNEL32.dll`, `CRYPT32.dll`, `ntdll.dll`, and `DWrite.dll`.
-- `MF.dll`, `MFPlat.dll`, and `MFReadWrite.dll` appear only in that executable's delay-import table.
-- No modern `vcruntime*`, `msvcp*`, or UCRT imports were present in the normal/delay tables of these eight files. FFmpeg imports Windows' `msvcrt.dll`, which is a different runtime.
-
-| Inspected file | Relevant native dependency finding |
-|---|---|
-| `chrome-headless-shell.exe` | Media Foundation references are delayed; no modern VC runtime imports |
-| `libEGL.dll` | No Media Foundation or modern VC runtime imports |
-| `libGLESv2.dll` | No Media Foundation or modern VC runtime imports |
-| `vk_swiftshader.dll` | No Media Foundation or modern VC runtime imports |
-| `vulkan-1.dll` | No Media Foundation or modern VC runtime imports |
-| `node.exe` | No Media Foundation or modern VC runtime imports |
-| `ffmpeg-win64.exe` | No Media Foundation or modern VC runtime imports; retain this companion file |
-| `PrintDeps.exe` | No Media Foundation or modern VC runtime imports |
-
-Dynamic library loads and transitive OS dependencies are not exhaustively established by these tables. The finding is scoped to these eight native files, not every .NET runtime component or future dependency. Actual cold launch, PDF output, and repeated operation without Media Foundation still require the clean-Windows gate in section 10. No Windows executable was run in this investigation.
 
 ## References
 
@@ -449,10 +420,6 @@ Primary documentation and implementation sources checked on 2026-10-23. Version-
 [chromium-mf-init]: https://chromium.googlesource.com/chromium/src/media/+/0574dcca29a22648921b44935d7e6c3ed3a397e3/base/win/mf_initializer.cc
 [pw-registry]: https://github.com/microsoft/playwright/blob/main/packages/playwright-core/src/server/registry/index.ts
 [pw-validation-override]: https://github.com/microsoft/playwright/issues/38334
-[inspected-headless-archive]: https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.4/win64/chrome-headless-shell-win64.zip
-[inspected-node-archive]: https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip
-[inspected-ffmpeg-archive]: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/ffmpeg/1013/ffmpeg-win64.zip
-[inspected-winldd-archive]: https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/winldd/1007/winldd-win64.zip
 [pw-version-props]: https://github.com/microsoft/playwright-dotnet/blob/v1.64.1/src/Common/Version.props
 [pw-browser-metadata]: https://github.com/microsoft/playwright/blob/v1.64.1/packages/playwright-core/browsers.json
 [pw-winldd]: https://github.com/microsoft/playwright/blob/v1.64.1/browser_patches/winldd/PrintDeps.cpp

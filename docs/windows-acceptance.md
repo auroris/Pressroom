@@ -1,9 +1,8 @@
 # Windows / IIS release acceptance
 
-The build-machine package check proves that a release can launch and render on
-the machine that built it. It does not prove a clean IIS deployment or the
-absence of hidden machine prerequisites. Complete this record against the actual
-published files on the target server before calling a release qualified. For
+Qualify a release by completing this record against the published files on the
+target IIS server. Check its prerequisites, application-pool permissions and
+rendering behavior in that environment. For
 Windows containers, use the lighter checks in [Containers](container.md); this
 checklist is for direct IIS hosting and physical printing.
 
@@ -31,7 +30,7 @@ directories. Keep normal Playwright validation and `ChromiumSandbox=true` enable
 
 - Start the actual IIS application and confirm `/v1/health` becomes 200 after
   warm-up. Confirm that `/v1/info` matches the expected release, browser, and font
-  versions. A build-directory run is not a substitute.
+  versions.
 - Submit `samples/orders-bilingual.request.json` through the real site and verify
   a PDF response, two pages, Letter portrait dimensions, page numbers, vector
   graphic, bold and italic faces, French accents and ligatures, outlines, and
@@ -97,8 +96,8 @@ SumatraPDF executable and add `Printing:Printers:pdf-test` with the value
 enough processing time to complete the printer's **Save Print Output As** dialog.
 Save to an absolute path outside the temporary job directory. Expect 202 JSON,
 `status: submitted`, a correlation `jobId`, `printer: pdf-test`, and `pageCount: 2`.
-Inspect both pages of the saved output. The returned job ID is not a spooler ID,
-and the response does not confirm physical printing.
+Inspect both pages of the saved output. Use the returned job ID to correlate the
+Pressroom submission and the Windows queue to check printing progress.
 
 For production acceptance, repeat against an actual configured printer under the
 dedicated IIS identity, which needs print permission and access to SumatraPDF.
@@ -116,8 +115,8 @@ ceiling. Measure the full UTF-8 JSON body, including escaped HTML and templates.
 Application-level oversized bodies should return 413 problem details; an IIS
 outer-limit rejection may use a native IIS response.
 
-Fill active and waiting capacity, verify 429 and `Retry-After`, and confirm queue
-saturation alone does not make `/v1/health` fail. Cancel queued and active requests,
+Fill active and waiting capacity, verify 429 and `Retry-After`, and confirm
+`/v1/health` stays ready during queue saturation. Cancel queued and active requests,
 including an expensive script or print operation using an opted-in key. Confirm
 capacity is actually released and follow-up renders complete. Readiness failures
 should return 422; the overall deadline should return 504 and terminate the
@@ -136,7 +135,7 @@ Perform at least 1,000 representative successful renders at configured concurren
 crossing planned browser-recycle thresholds. Record errors and retries, memory
 peaks, process counts, response times, and post-idle memory. Include slow clients
 so buffered PDF response admission is exercised. Confirm bounded memory and process
-growth rather than judging only total throughput.
+growth alongside total throughput.
 
 Trigger an IIS recycle during traffic and verify readiness, recovery, and cleanup.
 Test an owned-browser crash and supervised replacement. Budget for IIS overlapped
@@ -166,7 +165,6 @@ failure must not be treated as a successful deployment.
 ## Result
 
 Record **passed**, **failed**, or **not run** for each area, with the exact artifact,
-machine inventory, measurements, and outstanding limitations. A diagnostic host
-validation bypass, static DLL scan, or successful build-machine package check alone
-does not satisfy this gate. Requalify after changing the browser or native runtime
-payload.
+machine inventory, measurements, and outstanding limitations. Qualification requires
+the target-server checks above with host validation enabled. Requalify after
+changing the browser or native runtime payload.

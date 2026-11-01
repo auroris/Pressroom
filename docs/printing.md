@@ -1,9 +1,9 @@
 # Printing
 
-Besides returning PDFs, Pressroom can render a document and hand the pages to an
-allowlisted printer on Windows or Linux. Printing reuses the normal render request: add a
+Pressroom can render a document and submit its pages to an allowlisted printer on
+Windows or Linux. Printing uses the normal render request: add a
 `printer` identifier, authenticate with an API key, and receive a JSON submission
-receipt instead of PDF bytes.
+receipt.
 
 ## Requirements
 
@@ -23,8 +23,8 @@ receipt instead of PDF bytes.
 
 Each allowlist key is a caller-facing identifier of 1–128 ASCII letters, digits,
 underscores, and hyphens, matched ignoring case. Each value is an OS printer or
-CUPS destination name. No printer is enabled by default. Update the external
-settings file and restart Pressroom after changing the allowlist.
+CUPS destination name. Add printers to the initially empty allowlist in the external
+settings file, then restart Pressroom.
 
 ### Windows
 
@@ -68,8 +68,7 @@ user to check which queues that identity can access. For example:
 `CupsCommandPath` defaults to `/usr/bin/lp`; set it to `/usr/bin/lpr` to use CUPS
 `lpr`. It must be an absolute Linux path whose executable is named `lp` or `lpr`,
 with no command arguments. `SumatraPdfPath` is ignored on Linux, and
-`CupsCommandPath` is ignored on Windows. A helper is only needed when printing
-is configured; ordinary PDF rendering does not require CUPS.
+`CupsCommandPath` is ignored on Windows. Configure the helper when enabling printing.
 
 The service user needs permission to execute the helper, submit to the queue,
 and write under `Paths:StateRoot`. CUPS must accept submissions from this user
@@ -79,9 +78,8 @@ defaults in CUPS for that identity. Verify a PDF with
 using the API. Pressroom submits the PDF with normal CUPS filtering, so the queue
 must support converting PDF for the device.
 
-Linux printing is intended for a direct host installation. Pressroom does not
-detect or block containers; the supplied Docker image has no CUPS client or
-printer configuration.
+Use a direct Linux host installation for printing. The supplied Docker image
+omits the CUPS client and printer configuration.
 
 ## Submit a print job
 
@@ -118,18 +116,18 @@ When the helper reports success the response is **202 Accepted** with
 }
 ```
 
-`submitted` means the print helper reported a successful submission. It does not mean paper has finished
-printing. `jobId` is Pressroom's correlation identifier and the temporary PDF's
-basename, not an OS spooler job identifier. There is no spooler status endpoint:
-offline devices and later spooler errors are managed through the Windows or CUPS queue.
+`submitted` confirms that the print helper accepted the submission. Check the
+Windows or CUPS queue for printing progress, offline devices and later spooler
+errors. `jobId` is Pressroom's correlation identifier and the temporary PDF's
+basename; it differs from the OS spooler job identifier.
 
 With asynchronous jobs enabled, `POST /v1/jobs` accepts the same `printer` field
 and API-key requirement. A successful job contains a `printJob` receipt instead
 of a downloadable PDF.
 
 `GET /v1/printers` returns the configured identifiers to authenticated callers,
-for example `{"printers":["pdf-test","shipping"]}`. It lists the allowlist, not
-live queue health.
+for example `{"printers":["pdf-test","shipping"]}`. Check live queue health through
+Windows or CUPS.
 
 ## Errors and retries
 
@@ -155,7 +153,7 @@ automatically retry print requests, and neither does the .NET client's
 
 `Microsoft Print to PDF` is a convenient manual target. Select it as `pdf-test` and
 complete its **Save Print Output As** dialog before the request times out. Because
-it prompts for a destination file, it is a manual test target, not an unattended
-IIS destination. The [Windows acceptance checklist](windows-acceptance.md) and the
+it prompts for a destination file, use it for attended desktop tests. Choose an
+unattended queue for IIS. The [Windows acceptance checklist](windows-acceptance.md) and the
 [Linux acceptance checklist](linux.md#acceptance-checklist) include the printer
 checks for a real deployment.

@@ -1,9 +1,9 @@
 # Pressroom.Contracts
 
-Browser-independent contracts for the Pressroom HTML-to-PDF API, for .NET 8 and
-.NET 10. Includes RenderRequest, page and readiness options, IPdfRenderer,
-PdfRenderResult, job documents/status/errors, RequestValidator, and JsonDefaults.
-No runtime package dependencies.
+Request and response contracts for the Pressroom HTML-to-PDF API, for .NET 8 and
+.NET 10. Includes `RenderRequest`, page and readiness options, `IPdfRenderer`,
+`PdfRenderResult`, job records, `RequestValidator`, and `JsonDefaults`. The package
+uses the .NET base class library.
 
 Download both `Pressroom.Contracts` and `Pressroom.Client` `.nupkg` files from a
 GitHub release, or the `nuget-packages` artifact of the GitHub **Packages**

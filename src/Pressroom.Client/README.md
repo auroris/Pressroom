@@ -1,7 +1,7 @@
 # Pressroom.Client
 
 HTTP client for the Pressroom HTML-to-PDF service, for .NET 8 and .NET 10.
-Depends only on Pressroom.Contracts and the framework; no browser installation.
+Uses `Pressroom.Contracts` and the framework's HTTP APIs to call a running server.
 
 Download and extract `nuget-packages` from the GitHub **Packages** workflow, or
 download both Client and Contracts `.nupkg` files from a GitHub release. Keep them
@@ -26,14 +26,16 @@ var pdf = await pressroom.RenderAsync(new RenderRequest
 await File.WriteAllBytesAsync(pdf.FileName, pdf.Bytes);
 ```
 
-Reuse a caller-owned HttpClient (or register a typed client with AddHttpClient).
-RenderStreamAsync returns a disposable PdfRenderResult for streaming; PrintAsync
+Reuse a caller-owned `HttpClient` or register a typed client with `AddHttpClient`.
+`RenderStreamAsync` returns a disposable `PdfRenderResult` for streaming; `PrintAsync`
 submits to a configured Windows or Linux printer. Errors include HTTP status, problem
-details, and Retry-After. Retry policy belongs to the caller.
+details, and `Retry-After`. Retry policy belongs to the caller.
 
-With jobs enabled on the server, SubmitAsync/GetJobAsync/WaitAsync manage durable
-jobs, DownloadAsync/DownloadStreamAsync collect results, and CancelAsync removes
-them. RenderManyAsync bounds batch submission and yields PDFs or typed failures.
+With jobs enabled on the server, use `SubmitAsync` to create a durable job,
+`GetJobAsync` to read its status, and `WaitAsync` to wait for completion.
+`DownloadAsync` and `DownloadStreamAsync` collect results; `CancelAsync` cancels work
+or removes a result. `RenderManyAsync` bounds batch submission and yields PDFs or
+typed failures.
 
 See the [client guide](https://github.com/auroris/Pressroom/blob/main/docs/development/client.md)
 for configuration, validation, streaming, and printing.

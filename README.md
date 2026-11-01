@@ -1,7 +1,7 @@
 <h1 align="center">Pressroom</h1>
 
 <p align="center">
-  HTML in, PDF out. An HTML-to-PDF service for Windows, IIS, Linux, and containers.<br>
+  An HTML-to-PDF service for Windows, IIS, Linux, and containers.<br>
   An application <code>POST</code>s one complete HTML document; Pressroom returns print-quality PDF bytes,
   or sends the pages straight to an allowlisted Windows or Linux printer.
 </p>
@@ -26,9 +26,9 @@
 Pressroom is a standalone .NET 10 service that turns a complete HTML document into
 a PDF. A release is **one folder**: the server, its private Playwright driver and
 Node runtime, the matching Chromium headless shell, and the Noto Sans fonts, all
-pinned together with a manifest of file hashes. Copy it into an IIS application and
-it runs. The server needs the .NET 10 Hosting Bundle and nothing else: no Node, no
-Chrome, no font installation, no downloads at run time.
+pinned together with a manifest of file hashes. For IIS, install the .NET 10
+Hosting Bundle and deploy the complete release folder. The packaged renderer and
+fonts keep each installation on the versions tested for that release.
 
 - **One request, one PDF.** Send `html`, get `application/pdf` with the page count
   and render time in the headers. Your application controls delivery to the browser.
@@ -43,14 +43,14 @@ Chrome, no font installation, no downloads at run time.
   browser context.
 - **Print on Windows or Linux.** Add a `printer` identifier and Pressroom hands the
   pages to an allowlisted queue through SumatraPDF or CUPS, returning a submission receipt.
-- **Simple access control.** Named API keys with per-key JavaScript permission, or
+- **Access control.** Named API keys with per-key JavaScript permission, or
   explicit anonymous mode for a trusted network. Health stays anonymous for IIS
   warm-up and probes.
 - **Built for operations.** Stateless, bounded queue with `Retry-After`, one
   end-to-end deadline per request, planned browser recycling, metadata-only logs,
   an offline `--check` self-test, and stop-copy-start upgrades with folder rollback.
-- **A .NET client without the browser.** `Pressroom.Client` is HTTP-only, so
-  calling applications never take a Playwright dependency.
+- **HTTP integration for .NET.** `Pressroom.Client` handles requests, validation,
+  streaming, and errors for .NET 8 and .NET 10 applications.
 - **Opt-in batch jobs.** Submit, poll, download or cancel durable jobs. Per-key
   scheduling reserves capacity for interactive requests; local retention is bounded.
 - **Linux and containers.** Sandboxed Linux x64 packages, a non-root container,
@@ -65,8 +65,7 @@ Chrome, no font installation, no downloads at run time.
   [direct Linux installation](docs/linux.md) is also suitable when it runs under
   a dedicated unprivileged user; use API keys and HTTPS there too.
 - **Intranet use:** Windows/IIS installations and Windows containers are intended
-  primarily for networks where Pressroom is not exposed to internet traffic.
-  Both Linux deployment options also work on intranets.
+  primarily for internal networks. Both Linux deployment options also work on intranets.
 
 Network isolation remains an optional deployment setting; enable it for the
 recommended internet-facing Docker setup. See the [security model](docs/security.md).
@@ -127,7 +126,7 @@ the [Deployment guide](docs/deployment.md) covers the production IIS setup.
 | [Deployment on Windows and IIS](docs/deployment.md) | Server prerequisites, release contents, directories and permissions, IIS settings, first start, updating, and rollback. |
 | [Linux](docs/linux.md) | Shared libraries, fonts, user namespaces, systemd, updates, rollback, and the acceptance checklist. |
 | [Containers](docs/container.md) | Image tags, the sandboxed non-root Linux image, Compose, Kubernetes, Windows containers, and optional network isolation. |
-| [Security model](docs/security.md) | Trust boundaries, document isolation controls, authentication, retention, resource protection, and what is not guaranteed. |
+| [Security model](docs/security.md) | Trust boundaries, document isolation, authentication, retention, resource limits, and deployment responsibilities. |
 | [Windows / IIS acceptance](docs/windows-acceptance.md) | The checklist shipped with each release for qualifying a target server. |
 
 These guides ship inside every release package. Material for application
@@ -144,9 +143,9 @@ dotnet test --solution Pressroom.slnx -c Release
 ```
 
 The prerequisites are the .NET 10 SDK and, for publishing, a Visual Studio release
-that supports .NET 10 on Windows x64. Ordinary builds and tests never download
-browsers. Releases are cut by a manual GitHub Actions workflow; the developer guide
-in `docs/development` has the details.
+that supports .NET 10 on Windows x64. Publishing acquires the browser payload used
+by browser tests and releases. A manual GitHub Actions workflow builds releases;
+the developer guide in `docs/development` has the details.
 
 ## License
 

@@ -3,7 +3,7 @@
 The Linux container with the iptables isolation below is the recommended
 internet-facing deployment, together with API-key authentication and an HTTPS
 reverse proxy in front of the loopback-bound API. Windows containers are intended
-primarily for intranets where Pressroom receives no internet traffic. Firewall
+primarily for internal networks. Firewall
 configuration is optional in general, but is part of the recommended
 internet-facing setup.
 
@@ -24,15 +24,14 @@ UID/GID 10001. Chromium sandboxing and dependency validation remain enabled.
 - Outbound isolation is optional. Basic Docker networking permits outgoing
   connections. The rules below block new connections to the host, peers and
   internet while preserving responses to API requests.
-- The application filesystem is read-only. `/tmp` and `/var/lib/pressroom` are
-  temporary memory-backed filesystems; there is no persistent application volume.
+- The application filesystem is read-only. `/tmp` and `/var/lib/pressroom` use
+  temporary memory-backed storage for the container's lifetime.
 - `cap_drop: [ALL]` includes NET_ADMIN and NET_RAW; the application cannot alter
   network policy or open raw sockets.
 - JSON configuration and API keys live outside the container and are mounted
-  read-only. The Docker daemon is never mounted into the container.
-- The Linux image does not include CUPS client tools or printer configuration.
-  [Linux printing](printing.md) is intended for a direct host installation;
-  Pressroom does not detect or block printing in containers.
+  read-only.
+- For [Linux printing](printing.md), use a direct host installation with CUPS
+  client tools and configured queues. The supplied image omits those dependencies.
 
 Jobs and results disappear when this container stops, restarts, or is replaced.
 Download results before replacing it; clients must resubmit lost work. The direct
@@ -40,9 +39,8 @@ Linux installation can use persistent job storage instead.
 
 ## Optional Linux outbound isolation
 
-No host firewall changes are made by the image or ordinary Compose startup.
-To enable the API-only network policy, create a dedicated bridge and apply these
-rules **before** starting its containers. These commands use Docker Engine's
+To add outbound restrictions to ordinary Docker networking, create a dedicated
+bridge and apply these rules before starting its containers. These commands use Docker Engine's
 iptables firewall backend (including iptables-nft).
 
 ```sh
@@ -111,15 +109,13 @@ docker run -d --name pressroom --init -p 127.0.0.1:8080:8080 \
   ghcr.io/auroris/pressroom:<version>
 ```
 
-Keep `init: true` (Compose) or `--init` (`docker run`). The image's entry point is
-`dotnet` itself, and a process running as PID 1 inherits every orphaned descendant
-in the container. If a Chromium helper outlives its parent, .NET does not reap it
-and it would remain a zombie holding a process slot. Docker's minimal init runs as
-PID 1 instead: it reaps those orphans and forwards SIGTERM to the service, so
-graceful shutdown is unchanged.
+Keep `init: true` (Compose) or `--init` (`docker run`). Docker's minimal init runs
+as PID 1, reaps orphaned Chromium helpers and forwards SIGTERM to the service.
+This allows Pressroom's `dotnet` process to shut down gracefully and releases the
+process slots held by orphaned helpers.
 
-Health probes use `/v1/health`; a full jobs queue is not unhealthy. Keep the stop
-timeout above `Render:ShutdownTimeoutMs` plus a cleanup margin. Console logs are
+Health probes use `/v1/health`, which stays healthy when the jobs queue is full.
+Keep the stop timeout above `Render:ShutdownTimeoutMs` plus a cleanup margin. Console logs are
 available through Docker; files inside the state filesystem are temporary.
 Application settings are JSON-only; `ASPNETCORE_URLS` is a hosting setting.
 
@@ -165,9 +161,8 @@ ContainerUser, and uses `--rm` so stopping or crashing removes the complete
 writable layer. Start a new container with the helper after a stop or host reboot.
 Use stop followed by the start helper when discarding state: `docker restart`
 retains the same Windows writable layer, even with `--rm`.
-Windows Docker does not implement Linux capabilities or the Linux read-only and
-tmpfs options; it uses the unprivileged Windows identity and a disposable
-writable layer.
+Windows Docker uses the unprivileged Windows identity and disposable writable
+layer for this deployment's process permissions and state lifecycle.
 
 Outbound blocking is optional on Windows too. Add `-BlockOutbound` to the start
 helper to install and verify the dedicated HNS host and switch ACLs **before**
@@ -180,5 +175,5 @@ service ports on the container interface. They affect only the dedicated network
 
 Pull an explicit tag or digest, finish and download required jobs, then recreate
 the container with the same external configuration. Roll back by recreating it
-from the previous image digest. Temporary jobs and results are not carried between
-containers. Keep the host firewall installed throughout the change.
+from the previous image digest. Recreating the container discards its temporary
+jobs and results. Keep the host firewall installed throughout the change.

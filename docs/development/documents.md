@@ -1,17 +1,14 @@
 # Authoring documents
 
-Pressroom renders exactly what you send it: one complete HTML document, laid out by
-Chromium's print engine. This guide explains what a document may contain, how to
-control pagination, and how to get predictable fonts, headers, and footers. The
-[API reference](api.md) lists the request options these techniques pair with.
+Pressroom lays out one complete HTML document with Chromium's print engine. Use
+HTML and CSS to control its content and pagination, and the [request options](api.md)
+to set paper geometry, headers and footers.
 
 ## Documents are self-contained
 
-A request carries the whole document as a string. The renderer never fetches
-anything on its behalf:
+A request carries the complete document as a string, with its resources embedded:
 
-- **Styles** go in `<style>` elements or `style` attributes. `<link>` stylesheets
-  cannot load.
+- **Styles** go in `<style>` elements or `style` attributes.
 - **Images, fonts, and other resources** must be `data:` URLs. Network (`http:`,
   `https:`), local-file, and `blob:` resources are blocked before the document is
   parsed, including inside nested frames and `srcdoc` documents.
@@ -22,9 +19,8 @@ anything on its behalf:
   are disabled. Scripts are off unless the caller's API key permits them (see
   [JavaScript and readiness](#javascript-and-readiness)).
 
-Blocked resources are simply missing from the output. The server logs a count of
-blocked resources per render but never the URLs, so if an image fails to appear,
-check that it is embedded as a `data:` URL rather than referenced by address.
+If an image is missing, check that its source is a `data:` URL. The server logs a
+count of blocked resources for each render to help diagnose incomplete output.
 
 Inline SVG works well for logos, marks, and charts, and keeps documents small. The
 bundled [sample document](../../samples/orders-bilingual.html) uses an inline SVG mark.
@@ -32,8 +28,7 @@ bundled [sample document](../../samples/orders-bilingual.html) uses an inline SV
 ## Fonts
 
 The release packages **Noto Sans** in regular, bold, italic, and bold italic. These
-faces are injected into every document automatically, so you need no `@font-face`
-rule and no font installation on the server:
+faces are injected into every document automatically. Select them in CSS:
 
 ```css
 :root { font-family: 'Noto Sans', sans-serif; }
@@ -41,16 +36,15 @@ rule and no font installation on the server:
 
 Any other font must be embedded by the document as a `data:`-backed `@font-face`
 rule. Fonts installed on the Windows server may also resolve, but they are a
-machine property rather than part of the release, so treat them as optional and
-qualify them separately. `GET /v1/info` lists the guaranteed packaged faces.
+machine-specific choice that needs separate qualification. `GET /v1/info` lists
+the guaranteed packaged faces.
 
 Pressroom waits for the document's fonts to be ready before printing, within the
 render deadline.
 
 ## Page size, margins, and breaks
 
-Paper geometry comes from the request options, not from the document, unless you
-ask otherwise:
+Set paper geometry through the request options:
 
 - `options.pageSize` selects `Letter` (the default), `Legal`, `Tabloid`, `A3`, `A4`,
   `A5`, or custom dimensions such as `{ "width": "8.5in", "height": "11in" }`.
@@ -70,22 +64,21 @@ tr, figure { break-inside: avoid; } /* keep a row or figure on one page */
 .appendix { break-before: page; }   /* start a section on a new page */
 ```
 
-Repeated table headers come for free: Chromium repeats `<thead>` on each page of a
-long table.
+Chromium repeats `<thead>` on each page of a long table.
 
 ## Print and screen media
 
-Rendering uses print media by default, so `@media print` rules apply and
-`@media screen` rules do not. The sample document gives the page a tinted
-background on screen for previewing in a browser and a white background in print.
+Rendering uses print media by default, applying `@media print` rules. The sample
+document gives the page a tinted background on screen for previewing in a browser
+and a white background in print.
 Set `options.media` to `"screen"` to print a document exactly as a browser would
 display it. Background colours and images are printed by default; set
 `options.printBackground` to `false` to drop them.
 
 ## Headers and footers
 
-Running headers and footers are separate HTML templates in the request, not part
-of the document. The defaults leave the header blank and print "Page N / M"
+Supply running headers and footers as separate HTML templates in the request.
+The defaults leave the header blank and print "Page N / M"
 at the bottom right in 10px text with 20px of right padding:
 
 ```json
@@ -99,8 +92,8 @@ at the bottom right in 10px text with 20px of right padding:
 Chromium fills elements with the classes `date`, `title`, `url`, `pageNumber`, and
 `totalPages`. Templates have their own rules:
 
-- They do not inherit the document's CSS; give them inline styles, including an
-  explicit `font-size`, and leave room for them in the top and bottom margins.
+- Give each template its own inline styles, including an explicit `font-size`,
+  and leave room for it in the top and bottom margins.
 - Scripts in templates are not executed, and resources other than `data:` are
   blocked.
 - **Fonts in templates fall back to system fonts.** The packaged Noto Sans faces
@@ -120,9 +113,10 @@ alternative text in well-structured HTML become structure in the PDF. It also
 builds a **document outline** (bookmarks) from the heading hierarchy. Both can be
 turned off with `options.tagged` and `options.outline`.
 
-Tagging does not by itself make a PDF conform to PDF/UA. Good source HTML still
-matters: set `lang` on `<html>`, give the document a `<title>`, use real heading
-levels, add `alt` text, and mark table header cells with `<th scope>`.
+For accessible output, set `lang` on `<html>`, give the document a `<title>`, use
+semantic heading levels, add `alt` text, and mark table header cells with `<th scope>`.
+Validate the result against PDF/UA when conformance is required; tags alone do not
+establish conformance.
 
 ## Locale and time zone
 
@@ -141,9 +135,8 @@ scripts, which is how chart libraries and client-side templating can be used. Th
 request can opt out for an individual render with `"options": { "javaScript": false }`
 but can never grant permission the key lacks.
 
-Static HTML needs no readiness condition: Pressroom prints once the document and
-its fonts have loaded. A document that draws asynchronously can tell Pressroom
-when it is ready:
+Pressroom prints static HTML once the document and its fonts have loaded.
+A document that draws asynchronously can tell Pressroom when it is ready:
 
 ```json
 "options": {

@@ -1,11 +1,10 @@
 # Pressroom: next-phase implementation brief
 
-This brief is written to be handed to an implementer (human or AI) who does not
-have the repository open. It describes the system as it is today, the house rules
-that every change must respect, and four pieces of work in the order they should
-land: NuGet packages for the client, a Linux build, a container image, and an
-asynchronous job API. Each piece has acceptance criteria. Treat the existing
-documents under `docs/` as the source of truth for current behaviour.
+Status: historical implementation brief. This records the starting system,
+constraints and acceptance criteria for four planned additions: client NuGet
+packages, a Linux build, a container image, and asynchronous jobs. The requirements
+and paths below reflect that plan. Use the [Developing guide](developing.md) and
+[API reference](api.md) for the implemented workflow and current contract.
 
 ---
 
@@ -78,20 +77,15 @@ plus `.sha256`. The targets currently hard-fail unless `OS == Windows_NT` and
 - Logging is Serilog to console and rolling files under `<StateRoot>/logs`,
   metadata only. Logs must never contain document bodies, PDF bytes, secrets,
   blocked URLs, or page console text.
-- Historical Linux verification (see `docs/development/verification.md`): the full
-  suite including real-Chromium renderer tests passed on Linux with a test-only
-  executable override and, because the tests ran as root in a container, with the
-  sandbox disabled. Production sandboxing on Linux has not been demonstrated yet.
 
 ## 2. House rules for every change
 
 1. **Contract stability.** `POST /v1/render` and the existing JSON shape, headers,
    and status codes do not change. New capabilities are new endpoints, new optional
    fields, or new packages.
-2. **JSON-only configuration.** No environment-variable overrides for application
-   settings. New settings get a section, defaults in `appsettings.json`, startup
-   validation, and a row in `docs/configuration.md`. Container-friendliness comes
-   from `--config` and mounted files, not from env vars.
+2. **JSON-only configuration.** Add settings through JSON sections, defaults in
+   `appsettings.json`, startup validation, and a row in `docs/configuration.md`.
+   Containers select mounted settings files through `--config`.
 3. **Sandbox stays on.** Never add `--no-sandbox`, never make a sandbox failure
    non-fatal, never skip Playwright host validation in a release artefact.
 4. **Metadata-only logs** and no deliberate retention of documents beyond what a
@@ -100,20 +94,18 @@ plus `.sha256`. The targets currently hard-fail unless `OS == Windows_NT` and
 5. **Pinned and locked.** Playwright, Chromium, Node, and NuGet versions are pinned
    and restored with `--locked-mode`. A release artefact must pass a real `--check`
    with the bundled browser before it is published.
-6. **Windows and IIS remain first-class.** Nothing in the Linux or container work
-   may regress the IIS folder release, the Visual Studio publish check, or the
-   Windows acceptance record.
-7. **Docs ship with the code.** Each piece updates the relevant guides under
-   `docs/` (user and integrator focused), adds a verification entry under
-   `docs/development/verification.md`, and extends `docs/windows-acceptance.md` or
-   adds a Linux acceptance record where deployment behaviour changes.
+6. **Preserve Windows and IIS support.** Keep the IIS folder release, Visual Studio
+   publish check, and Windows acceptance checks passing throughout the Linux and
+   container work.
+7. **Docs ship with the code.** Each piece updates the relevant user and integrator
+   guides and extends the Windows or Linux acceptance checklist where deployment
+   behaviour changes.
 8. **Tests first-class.** Unit and API tests use renderer substitutes; renderer
    and sandbox tests use the real browser. New behaviour gets both where applicable.
 
 ## 3. Work item A: NuGet packages for the client
 
-**Goal.** Integrators add `Pressroom.Client` from nuget.org instead of referencing
-projects from a clone.
+**Goal.** Integrators install `Pressroom.Client` as a NuGet package from nuget.org.
 
 **Scope.**
 
@@ -204,7 +196,7 @@ is explicitly unsupported on Linux.
    header and footer templates fall back to system fonts. The Linux package must
    install a system fallback (`fonts-noto-core` or `fonts-liberation`) and
    `fontconfig`, otherwise footers may render as boxes. Verify with the bilingual
-   sample and add the result to the verification record.
+   sample as part of deployment acceptance.
 7. **Paths and case.** The code already switches string comparison by OS; audit
    `ServerConfiguration`, `FontCatalog`, and `RuntimePaths` for any remaining
    Windows path assumptions (drive letters, backslashes in defaults, `.exe` suffix).
@@ -229,9 +221,9 @@ is explicitly unsupported on Linux.
 **Documentation.** New `docs/linux.md` (prerequisites, directory layout and
 permissions, systemd unit example with `--config`, sandbox requirements, update and
 rollback) linked from the README table; `docs/deployment.md` stays Windows and IIS
-focused and cross-links. New `docs/linux-acceptance.md` mirroring the Windows
-record: cold start as a non-root user, sandbox on, both access modes, limits and
-cancellation, recycle and shutdown, soak.
+focused and cross-links. The Linux guide includes an acceptance checklist covering
+cold start as a non-root user, sandbox on, both access modes, limits and
+cancellation, recycle and shutdown, and soak testing.
 
 **Acceptance.**
 
@@ -309,8 +301,8 @@ with `packages: write`.
 **Documentation.** New `docs/container.md` (run, Compose, Kubernetes, seccomp, shm,
 volumes, health, upgrade by tag, rollback by previous tag) linked from the README
 table; README badges gain a container badge; `docs/security.md` gains a paragraph on
-what the container adds (read-only root, non-root user) and still does not add
-(network egress policy, which belongs to the NetworkPolicy or firewall).
+the container's read-only root and non-root user, with network egress enforced
+through a NetworkPolicy or firewall.
 
 **Acceptance.**
 
@@ -331,18 +323,18 @@ what the container adds (read-only root, non-root user) and still does not add
 **Problem.** The synchronous API admits `Concurrency + QueueLimit` requests (10 by
 default) and answers 429 beyond that. A caller producing hundreds of documents
 (statements, nightly batches) must pace itself and hold connections open for every
-render. An asynchronous mode lets a caller submit work, go away, and collect results.
+render. An asynchronous mode lets a caller submit work and collect results later.
 
 **Design principles.**
 
-- The synchronous path is untouched and keeps priority: async work must never
-  starve interactive renders.
+- The synchronous path keeps its existing behavior and priority, with capacity
+  reserved for interactive renders.
 - Async is **opt-in** (`Jobs:Enabled=false` by default) because it introduces
-  storage of rendered PDFs, which the current design deliberately avoids.
+  storage of rendered PDFs.
 - Single instance in v1, same as today. Multi-instance needs a shared store and is
   explicitly out of scope, but the store is behind an interface so it can be added.
-- Polling first. Callbacks are a later, opt-in extension because today the server
-  makes no outbound connections, and that property is part of the security story.
+- Polling first. Callers retrieve job status and results through the API. A later
+  callback extension would need an explicit outbound network policy.
 
 **API.**
 
@@ -377,8 +369,8 @@ confirming existence).
 **Scheduling.**
 
 - A `JobScheduler` hosted service owns a set of per-key FIFO queues and dispatches
-  in round-robin across keys, so one caller's thousand-document batch does not block
-  another caller's five.
+  in round-robin across keys, giving each caller a turn even when another submits
+  a large batch.
 - Workers: `Jobs:Workers` (default 1). A worker acquires a render slot from the same
   `BrowserRenderer` as sync requests. To keep sync priority, the worker only takes a
   slot when at least `Jobs:ReservedSyncSlots` (default 1) slots remain free for
@@ -412,9 +404,8 @@ confirming existence).
   on startup.
 - **Restart semantics.** On startup, jobs found in `queued` state are re-enqueued
   (their request is on disk); jobs found in `rendering` are marked `failed` with
-  `code: "interrupted"` and `retryable: true`. This is the one place where storing
-  the request pays for itself. Document that a crash loses nothing that was
-  acknowledged with 202 except the in-flight render.
+  `code: "interrupted"` and `retryable: true`. Document that queued requests
+  acknowledged with 202 survive a restart, while in-flight renders become failures.
 - **Retention statement** for `docs/security.md`: with jobs enabled, submitted HTML
   and rendered PDFs are stored on local disk under the state root for the configured
   retention, readable by the service identity; operators who need encryption at
@@ -436,11 +427,11 @@ queue is not unhealthy.
 - `RenderManyAsync(IEnumerable<RenderRequest>, int maxInFlight, CancellationToken)
   → IAsyncEnumerable<(RenderRequest, RenderedPdf | PressroomException)>` that
   submits with bounded concurrency, polls, downloads, and deletes on success. This
-  is the method batch callers actually want.
+  gives batch callers one stream of completed results.
 - `PressroomException` gains `Code` (string) and `Retryable` (bool?) from the job
   error shape. The client never retries automatically.
 
-**Out of scope for v1, written down so nobody improvises them:** webhooks and
+**Later extensions:** webhooks and
 callbacks (would require per-key outbound allowlists and HMAC signing); shared or
 database-backed stores and multi-instance affinity; server-side ZIP of a batch;
 priorities beyond sync-over-async; automatic retry on the server.
@@ -490,7 +481,7 @@ expiry, per-key isolation, disk limit).
    server endpoints behind `Jobs:Enabled`), scheduler and local store, then
    `RenderManyAsync` and documentation. Each PR keeps the sync path's tests green.
 
-Each PR updates `docs/` and `docs/development/verification.md`, and the final PR of
+Each PR updates the relevant guides and acceptance checklists, and the final PR of
 each work item updates `README.md` where features or badges change. Keep the
-existing writing style: short sections, tables for reference material, explicit
-statements of what is and is not guaranteed.
+writing style focused on capabilities and implementation steps, with short
+sections, reference tables, and explicit limits where they affect a decision.

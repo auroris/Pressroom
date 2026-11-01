@@ -1,25 +1,22 @@
 # Security model
 
-Pressroom is built for one job: applications you control send
-HTML, and a server you control turns it into PDF. This page describes the
-boundaries it enforces, what it deliberately does not promise, and how to deploy it
-accordingly.
+Pressroom renders HTML from your applications on a server you control. Its browser
+isolation, authentication and resource limits work alongside the host permissions
+and network policy you configure for the deployment.
 
 ## Who is trusted
 
 - **Calling applications** are trusted parties identified by API keys. They own
   their templates, their users' authorization, and what ends up in a document.
-- **Documents** are not trusted. Every render runs in a fresh, isolated browser
-  context with the controls below, whether the HTML came from a template or from
-  user input upstream.
+- **Documents** run in a fresh, isolated browser context with the controls below.
+  These controls apply to every document, including templates and upstream user input.
 - **The server** holds the keys and the browser. Run it behind HTTPS under a
   least-privileged identity, using the deployment recommendation below for its exposure.
 
 ## Document isolation
 
-Each render receives a new nonpersistent browser context that is disposed when the
-request ends. No cookies, storage, or state are shared between renders. Inside that
-context:
+Each render receives its own browser context, including cookies and storage. The
+context is disposed when the request ends. Its controls are:
 
 | Control | Effect |
 |---|---|
@@ -33,12 +30,12 @@ context:
 | Navigation | Navigating the main document away from the submitted HTML closes the page |
 | Chromium sandbox | On (`Render:ChromiumSandbox: true`). A failed sandboxed launch is a startup error; `--no-sandbox` is not a supported workaround |
 
-Two behaviours of the bundled Chromium build show up as failed renders rather than
-as weaknesses. A header or footer template that tries to load an external resource
-can be rejected at print time or run until the request deadline, and a WebRTC
-attempt inside a `srcdoc` or blank child frame can crash that render under the
-connection policy. In both cases the caller gets an error with no document content
-in it, the browser context is closed, and later renders are unaffected.
+The bundled Chromium can fail a render when a header or footer template attempts
+to load an external resource: printing either rejects the template or reaches the
+request deadline. A WebRTC attempt inside a `srcdoc` or blank child frame can also
+crash that render under the connection policy. In both cases the caller receives
+an error that excludes document content, the browser context closes, and later
+renders proceed normally.
 
 ## Authentication
 
@@ -48,15 +45,15 @@ in it, the browser context is closed, and later renders are unaffected.
 - Secrets are compared in constant time, must be unique, and are identified in logs
   only by their nonsecret key identifier.
 - A supplied invalid, empty, oversized, or duplicate key header returns 401 in
-  either mode. There is no fallback to a Windows identity and no Negotiate or NTLM
-  challenge; under IIS, Pressroom disables automatic Windows authentication.
+  either mode. Under IIS, Pressroom disables automatic Windows authentication and
+  applies its configured access policy to every caller.
 - Anonymous mode must be selected explicitly. It still rejects invalid keys,
   always renders without scripts, and never allows printing without a key.
 
 ## Retention and logging
 
-- Synchronous PDF-only requests do not deliberately store input HTML or output PDFs. Renders
-  write no PDF file; the page count is read from the in-memory document.
+- Synchronous PDF-only requests process HTML and PDF bytes in memory, including
+  page counting.
 - Printer requests write the PDF to a private job directory under
   `<StateRoot>/temp` for SumatraPDF or CUPS and remove it after submission. Like
   job storage, print directories are owner-only: mode 0700 on Linux, and on Windows
@@ -67,7 +64,7 @@ in it, the browser context is closed, and later renders are unaffected.
   blocked URLs, or page console and error text. Page diagnostics returned to the
   caller on 422 are bounded.
 - Chromium may create temporary files in its private working directory, and the
-  operating system may page memory. Pressroom does not claim zero disk writes.
+  operating system may page memory.
 
 ## Job storage and containers
 
@@ -75,8 +72,9 @@ With jobs enabled, HTML/PDFs live under `<StateRoot>/jobs/<id>` for configured
 retention. Linux uses 0700 directories/0600 files; Windows uses a protected
 service-SID DACL. Use volume encryption for encryption at rest. Successful jobs
 remove HTML; failed input and results follow [retention settings](configuration.md).
-Storage is locked to one instance. With persistent storage, queued jobs survive restart; active jobs become
-failed/interrupted. Interrupted printing may have reached the OS spooler.
+Storage is locked to one instance. With persistent storage, queued jobs survive
+restart; active jobs become failed/interrupted. Interrupted printing may have
+reached the OS spooler.
 
 Owners are API key identifiers. Rotating a secret under the same identifier keeps
 access; reusing an identifier grants access to its prior jobs. Other keys get 404
@@ -88,7 +86,7 @@ The Linux container recipe uses a non-root identity, a read-only root, and tempo
 memory-backed state. Windows uses ContainerUser and a disposable writable layer;
 stop and recreate it to discard state. See [containers](container.md) for the
 lifecycle differences. Egress policy belongs to a firewall or NetworkPolicy.
-No callbacks or outbound job delivery are implemented. Job logs remain metadata only.
+Callers poll for job status and download results through the API. Job logs record metadata.
 
 ## Resource protection
 
@@ -98,8 +96,8 @@ No callbacks or outbound job delivery are implemented. Job logs remain metadata 
 - Two concurrent renders plus eight queued requests by default; beyond that,
   429 with `Retry-After` while readiness stays healthy.
 - Every request has one end-to-end deadline (30 s by default, 60 s maximum). A
-  timeout or client disconnect closes the browser context rather than leaving
-  work running, and a stuck cleanup triggers supervised browser replacement.
+  timeout or client disconnect closes the browser context. A stuck cleanup
+  triggers supervised browser replacement.
 - The browser is recycled after a planned number of renders, draining in-flight
   work first.
 
@@ -111,9 +109,9 @@ No callbacks or outbound job delivery are implemented. Job logs remain metadata 
   [direct Linux installation](linux.md) is also suitable when it runs under a
   dedicated unprivileged user, with API keys and HTTPS.
 - **Intranet use:** Windows/IIS installations and Windows containers are intended
-  primarily for networks where Pressroom is not exposed to internet traffic.
-  Both Linux options also work here. Use HTTPS and application-specific keys
-  here too. Host firewall configuration remains an optional deployment choice.
+  primarily for internal networks. Both Linux options also work here. Use HTTPS
+  and application-specific keys. Host firewall configuration remains an optional
+  deployment choice.
 - On IIS, run a dedicated application pool identity with read and execute access
   to the release folder and the documented state-directory permissions.
   See [Deployment](deployment.md).
@@ -125,22 +123,24 @@ No callbacks or outbound job delivery are implemented. Job logs remain metadata 
 - Verify every release's `release-manifest.json` hashes and the archive checksum
   before deployment.
 
-## What is not guaranteed
+<a id="what-is-not-guaranteed"></a>
 
-- **Operating-system egress isolation.** The controls above are browser and
-  application controls, verified by tests. A deployment that needs a strict
-  no-network guarantee must enforce it independently, for example with firewall
-  policy on the worker identity. The [Linux container deployment](container.md)
-  documents and tests optional iptables rules on Linux and HNS ACLs on Windows
-  for this purpose. Ordinary container startup does not install host firewall
-  rules; opt in to the isolated deployment recipe when outbound denial is required.
-- **Protection against a browser exploit.** The Chromium sandbox and a fresh
-  context per render limit exposure; they are not a substitute for keeping the
-  release current and the server isolated.
-- **HTML sanitisation.** Pressroom rejects `<base>` and blocks fetching; it does not
-  rewrite or validate document content beyond that.
-- **PDF/UA conformance.** Tagged output is requested by default, but conformance
-  depends on the source HTML.
+## Deployment responsibilities
+
+- **Operating-system egress isolation.** Enforce strict outbound restrictions with
+  an independently tested host network policy, such as firewall rules on the
+  worker identity. The [container guide](container.md) documents optional iptables
+  rules on Linux and HNS ACLs on Windows. Apply the isolated deployment recipe to
+  add these host controls to Pressroom's browser and application controls.
+- **Browser updates and host isolation.** Keep the release current and isolate the
+  server to limit exposure to browser exploits. Chromium's sandbox and the fresh
+  context for each render provide additional containment.
+- **HTML sanitisation.** Validate and sanitise content in the calling application.
+  Pressroom's document checks reject `<base>` and block resource fetching; they
+  are not general-purpose HTML sanitisation.
+- **PDF/UA conformance.** Validate the source HTML and resulting PDF against your
+  accessibility requirements. Pressroom requests tagged output by default;
+  conformance depends on the source HTML.
 
 The controls above are exercised by automated tests against real Chromium on every
 release build. The [Windows / IIS acceptance checklist](windows-acceptance.md) and

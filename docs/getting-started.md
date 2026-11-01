@@ -1,9 +1,8 @@
 # Getting started
 
-This guide takes you from a release package to your first PDF in about ten
-minutes, using a local console run on Windows. The same steps apply on Linux with
-the paths from the [Linux guide](linux.md). For production hosting see
-[Deployment on Windows and IIS](deployment.md), [Linux](linux.md), or
+Create your first PDF by running a release package locally on Windows. The same
+steps apply on Linux with the paths from the [Linux guide](linux.md). For production
+hosting see [Deployment on Windows and IIS](deployment.md), [Linux](linux.md), or
 [Containers](container.md).
 
 ## 1. Download and extract a release
@@ -21,13 +20,13 @@ Expand-Archive .\Pressroom-<version>-win-x64-framework-dependent.zip -Destinatio
 The archive is the complete application: the server, its private Playwright driver
 and Node runtime under the hidden `.playwright` folder, the matching Chromium
 headless shell under `browsers`, the Noto Sans fonts, third-party notices, these
-guides, and a `release-manifest.json` listing every version and file hash. Nothing
-downloads at run time, so do not prune the folder.
+guides, and a `release-manifest.json` listing every version and file hash. Keep
+the complete folder so the service can use its packaged dependencies at startup.
 
-The only machine prerequisite is the **.NET 10 runtime**. For IIS, install the
+Install the **.NET 10 runtime**. For IIS, install the
 [.NET 10 Hosting Bundle](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0),
-which includes the runtime and the IIS module. No Node, npm, Chrome, Edge, Visual
-C++ redistributable, or font installation is needed.
+which includes the runtime and the IIS module. The release supplies the renderer,
+its private runtime, and the document fonts.
 
 ## 2. Create the settings file
 
@@ -62,17 +61,16 @@ Generate each secret from at least 32 random bytes, for example:
 [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }) -as [byte[]])
 ```
 
-Pressroom ships without a key and refuses to start in API-key mode until one is
-configured. The key identifier (`reporting-app`) is not secret; it appears in logs so
-you can tell callers apart. The [Configuration guide](configuration.md) describes
-every setting, including anonymous mode for trusted networks and JavaScript
+API-key mode requires at least one configured key before startup. Each key's
+identifier (`reporting-app`) is a label shown in logs so you can distinguish callers.
+The [Configuration guide](configuration.md) describes every setting, including
+anonymous mode for trusted networks and JavaScript
 permission for chart-producing applications.
 
 ## 3. Check the package
 
 The server has an offline self-test that launches the bundled Chromium with the
-sandbox enabled, renders a warm-up document, and exits. It listens on no port and
-installs nothing:
+sandbox enabled, renders a warm-up document, and exits:
 
 ```powershell
 & 'C:\Sites\Pressroom\Pressroom.Server.exe' --check --config 'C:\ProgramData\Pressroom\pressroom.settings.json'
@@ -130,7 +128,7 @@ The response is `application/pdf` with a `Content-Disposition: attachment` heade
 carrying the sanitized file name, plus `X-Render-Pages` and `X-Render-Duration-Ms`.
 The calling application controls how it serves the PDF to a browser. Open
 `orders.pdf` and you should see the two-page bilingual document with
-"Page 1 / 2" and "Page 2 / 2" footers at the bottom right and no running header.
+"Page 1 / 2" and "Page 2 / 2" footers at the bottom right.
 
 A minimal request is just the HTML:
 
@@ -157,5 +155,5 @@ client package is attached to each GitHub release for teams that want one.
 | Put it on an IIS server and keep it updated | [Deployment](deployment.md) |
 | Run it on Linux under systemd | [Linux](linux.md) |
 | Run it as a Linux or Windows container | [Containers](container.md) |
-| Understand what the sandbox does and does not guarantee | [Security model](security.md) |
+| Configure document isolation and deployment security | [Security model](security.md) |
 | Qualify a Windows server before go-live | [Windows / IIS acceptance](windows-acceptance.md) |

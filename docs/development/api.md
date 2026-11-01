@@ -109,8 +109,8 @@ X-Render-Duration-Ms: 1091
 
 `X-Render-Duration-Ms` measures processing from admission through page counting,
 including queue time. `Content-Disposition` always uses `attachment` to carry the
-sanitized filename to the caller. It does not configure the application's
-response to its browser; the application sets those headers itself.
+sanitized filename to the caller. The application sets its own browser response
+headers to choose display or download.
 
 ### Print receipt
 
@@ -121,8 +121,8 @@ request returns **202 Accepted** with `application/json`:
 { "jobId": "64e5b7e07c8e4bdb86521bed5cd54d4c", "printer": "shipping", "status": "submitted", "pageCount": 1 }
 ```
 
-`submitted` means the print helper accepted the job, not that it has printed. See
-[Printing](../printing.md).
+`submitted` confirms acceptance by the print helper. Check printing progress in
+the Windows or CUPS queue. See [Printing](../printing.md).
 
 ### Status codes
 
@@ -149,19 +149,19 @@ forced process termination cannot be guaranteed to produce problem details.
 ### Deadlines and capacity
 
 One deadline, `options.timeoutMs`, covers waiting in the queue, loading the
-document, readiness, PDF generation, and page counting. It does not restart between
-stages and excludes sending the PDF to the client. Two renders run concurrently and
+document, readiness, PDF generation, and page counting. All stages share that
+deadline; response transmission has a separate lifetime. Two renders run concurrently and
 eight more may wait by default; the eleventh concurrent request receives 429. The
 admission permit is held until the response has been sent, so slow clients count
 against capacity. The [Configuration guide](../configuration.md#rendering-limits)
-explains the knobs.
+explains the settings.
 
 ## GET /v1/health
 
 Returns 200 `{"status":"ready"}` only after a successful warm-up while the browser
 is available, and 503 `{"status":"unavailable"}` during startup, browser
-replacement, failure, or shutdown. Queue saturation does not make the service
-unhealthy. This endpoint never requires a key, which makes it suitable for IIS
+replacement, failure, or shutdown. Readiness stays healthy during queue saturation;
+render requests beyond capacity receive 429. The anonymous endpoint supports IIS
 Application Initialization and load balancer probes.
 
 ## GET /v1/info
@@ -183,13 +183,13 @@ Application Initialization and load balancer probes.
 ```
 
 `fonts` lists only the packaged faces guaranteed by the release. `storedBytes`
-includes a per-job metadata reserve; a full queue or storage budget is not itself
-unhealthy. The response never includes keys, document content, or file system paths.
+includes a per-job metadata reserve. Readiness stays healthy when the queue or
+storage budget is full.
 
 ## GET /v1/printers
 
 Returns `{"printers":["pdf-test","shipping"]}`: the configured allowlist, sorted,
-for callers presenting a valid API key. It does not report queue health.
+for callers presenting a valid API key. Use Windows or CUPS to inspect queue health.
 
 ## Request size and encoding
 
@@ -237,13 +237,13 @@ route; decide whether to retry from the job's `error`, not from `Retry-After`.
 
 ### Scheduling and restarts
 
-Queue time does not count against the rendering timeout, which starts when the
-job is dispatched. Workers take jobs in submission order but rotate between owners,
-and they never use the render slots reserved for synchronous requests. After a
+The rendering timeout starts when a job is dispatched. `Jobs:MaxQueueAge` limits
+its wait in the queue. Workers take jobs in submission order and rotate between
+owners, using the slots available after reserving synchronous capacity. After a
 restart, queued jobs resume and jobs that were rendering are marked failed with
-the code `interrupted`. There are no automatic retries and no callbacks. A print
-job interrupted mid-submission may or may not have reached the spooler; check the
-queue before resubmitting.
+the code `interrupted`. Callers poll for status and decide whether to resubmit a
+failed job. An interrupted print submission may already have reached the spooler;
+check the queue before resubmitting.
 
 ### Retention
 

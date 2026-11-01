@@ -1,6 +1,6 @@
 # Configuration
 
-Pressroom is configured by JSON files only. The packaged `appsettings.json` holds
+Configure Pressroom through JSON files. The packaged `appsettings.json` holds
 nonsecret defaults; one **external settings file** holds everything specific to a
 server, including API keys. Settings are read at startup, so restart the
 application after changing them. Environment variables are not read, and command
@@ -50,8 +50,7 @@ is a complete starting point.
 - Each entry maps a **nonsecret identifier** (1–128 characters, shown in logs) to an
   object with a `Secret` and an optional `AllowJavaScript` flag.
 - Secrets must be 16–4096 characters, unique across identifiers, and generated from
-  at least 32 random bytes. The application ships without a key and fails startup
-  in API-key mode until at least one is configured.
+  at least 32 random bytes. Configure at least one key before starting in API-key mode.
 - Secrets are compared in constant time and never logged.
 - An invalid, empty, oversized, or duplicate `X-Api-Key` header returns 401.
 
@@ -70,17 +69,17 @@ have JavaScript disabled, and anonymous callers cannot print or list printers; a
 caller in anonymous mode may still present a valid configured key to use those
 permissions. Printer discovery requires a valid key on both Windows and Linux.
 
-Windows authentication and domain group checks are not supported. Under IIS,
-enable Anonymous Authentication and disable Windows Authentication; Pressroom
-enforces its own access mode.
+Under IIS, enable Anonymous Authentication and disable Windows Authentication so
+requests reach Pressroom's API-key or anonymous access policy. Windows identities
+and domain groups do not grant access.
 
 ## JavaScript permission
 
 Every key starts with scripts disabled. Set `"AllowJavaScript": true` on the keys
 whose applications need scripts, such as chart producers, and restart. Permission
-takes effect automatically: a request needs no flag, and a readiness `function`
-works without further setup. The request option `options.javaScript` defaults to
-`true` and can only *disable* scripts for one render; setting it to `true` cannot
+takes effect automatically, including for readiness functions. The request option
+`options.javaScript` defaults to `true` and can only disable scripts for one render;
+setting it to `true` cannot
 grant permission to a key that lacks it. A readiness function on a request whose
 effective JavaScript is disabled returns 400.
 
@@ -101,9 +100,9 @@ effective JavaScript is disabled returns 400.
 | `Render:ChromiumPath` | unset | Advanced: an explicitly validated executable override, outside the standard package guarantee |
 
 The processing deadline covers queue time, document loading, readiness, PDF
-generation, and page counting. It does not include sending the finished PDF to a
-slow client, but the admission permit is held until the response completes so slow
-clients cannot accumulate unbounded buffered PDFs.
+generation, and page counting. Response transmission has a separate lifetime:
+the admission permit stays held until the response completes, keeping buffered
+PDFs within the capacity limit even when clients download slowly.
 
 ## Paths and logging
 
@@ -137,7 +136,7 @@ URLs, or page console text. Arbitrary Serilog sink settings are not loaded.
 
 `Printers` maps caller-facing identifiers (1–128 ASCII letters, digits, hyphens,
 and underscores, matched ignoring case) to exact Windows printer names or Linux
-CUPS destinations. No printer is enabled by default. Windows requires
+CUPS destinations. Add entries to enable those printers. Windows requires
 `SumatraPdfPath`; Linux uses `CupsCommandPath`, default `/usr/bin/lp`, which can
 also be an absolute path to CUPS `lpr` (for example `/usr/bin/lpr`). The helper
 setting for the other OS is ignored. See the [Printing guide](printing.md) for
@@ -162,9 +161,9 @@ Use one instance per state root. JSON time spans use `hh:mm:ss` or `d.hh:mm:ss`.
 | `Jobs:DeleteResultOnDownload` | `false` | Delete after the first complete successful download |
 
 All durations must be between one second and 30 days. The queue limits count
-waiting jobs only, not the ones being rendered. Synchronous requests always take
-priority: background jobs never use the reserved render slots, and a job's
-rendering deadline starts when it is dispatched, not when it was queued.
+waiting jobs; active renders count against `Jobs:Workers`. Synchronous requests
+take priority and keep their reserved render slots. A job's rendering deadline
+starts at dispatch; `MaxQueueAge` limits its wait in the queue.
 
 When the queue or the per-key quota is full, submission returns 429 with
 `Retry-After`. A result that would exceed `MaxStoredBytes` fails the job with the
@@ -182,7 +181,7 @@ downloaded is kept until the download finishes.
 A job whose files cannot be removed yet, for example because a backup or scanner
 holds one open, is logged as a warning and retried on a later sweep without
 affecting other jobs. A storage error while a job runs is logged and marks that job
-failed where possible; it never stops the service or synchronous rendering.
+failed where possible; the service continues accepting synchronous renders.
 Disabling jobs also stops the sweeper, so drain or delete jobs first if retention
 must continue.
 
@@ -191,11 +190,10 @@ must continue.
 Pressroom refuses to start, and `--check` fails, on invalid limits, missing packaged
 assets, an unusable `StateRoot`, an unknown `Auth:Mode`, invalid key entries,
 duplicate secrets, API-key mode without keys, or unknown properties under any
-settings section (`Render`, `Paths`, `Fonts`, `Auth`, `Printing`, and `Jobs`), so
-a misspelt key such as `Render:Concurency` is an error rather than a silently
-ignored setting. Startup also verifies that the launched browser actually enforces
-its connection policy and fails if it does not, including for an executable
-override.
+settings section (`Render`, `Paths`, `Fonts`, `Auth`, `Printing`, and `Jobs`).
+For example, a misspelt key such as `Render:Concurency` produces a configuration
+error. Startup also tests the launched browser's connection-policy enforcement,
+including for an executable override, and requires that test to pass.
 
 ## Upgrading from earlier configurations
 
