@@ -53,11 +53,10 @@ var pdf = await pressroom.RenderAsync(new RenderRequest
 {
     Html = "<!doctype html><html><body><h1>Package smoke — prêt</h1></body></html>",
     FileName = "smoke.pdf",
-    Disposition = PdfDisposition.Inline,
     Options = new RenderOptions { PageSize = PageSize.Named("A4"), Margins = new PageMargins { Top = "15mm", Bottom = "15mm" } }
 });
 if (pdf.PageCount != 1 || !pdf.Bytes.AsSpan().StartsWith("%PDF"u8)) throw new Exception("Invalid PDF.");
-Console.WriteLine($"Consumer {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}: {pdf.PageCount} page, {pdf.Bytes.Length} bytes, {pdf.Disposition}.");
+Console.WriteLine($"Consumer {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}: {pdf.PageCount} page, {pdf.Bytes.Length} bytes, {pdf.FileName}.");
 '@ | Set-Content (Join-Path $directory Program.cs)
     dotnet build $project -c Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Consumer build failed.' }
