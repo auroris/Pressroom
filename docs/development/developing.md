@@ -44,10 +44,11 @@ Application-developer material (the [API reference](api.md), the
 
 ## Build and test
 
-The solution pins exact NuGet versions in lock files. From the solution directory:
+The solution restores NuGet dependencies from the project files without package
+lock files. From the solution directory:
 
 ```sh
-dotnet restore Pressroom.slnx --locked-mode
+dotnet restore Pressroom.slnx
 dotnet build Pressroom.slnx -c Release --no-restore
 dotnet test --solution Pressroom.slnx -c Release
 ```
@@ -135,8 +136,8 @@ as part of publishing.
 Your usual Visual Studio **IIS / Web Deploy** profile works for `Pressroom.Server`:
 select **Release**, **net10.0**, **win-x64**, framework-dependent, with single-file,
 trimming, and AOT disabled. The project's publish targets add the browser assets to
-that profile's payload. Keep `RestoreLockedMode=true` to enforce the lock files, and
-keep credentials in Visual Studio's user settings rather than a committed `.pubxml`.
+that profile's payload. Keep credentials in Visual Studio's user settings rather
+than a committed `.pubxml`.
 
 `EnableMsDeployAppOffline` defaults to `true`, allowing the ASP.NET Core module to
 stop the application before Web Deploy replaces locked files. For a Folder profile
@@ -202,14 +203,12 @@ installs and checks the optional HNS policy and needs an administrator session.
 ### Playwright version selection
 
 Every build helper takes `-PlaywrightVersion`. The default, `pinned`, is the
-repository's `PressroomPlaywrightVersion` property with the checked-in lock files,
-restored in locked mode without a refresh, so the payload can be reproduced from
-the commit. `latest` is an explicit opt-in that resolves the newest stable release
-from NuGet, and an explicit `<version>` selects or reproduces a recorded one.
-Either of those refreshes the transitive lock files; on Windows that rewrites the
-lock files in the checkout, so do not commit the result unless you are
-deliberately upgrading the pin. The Dockerfile's apt package list follows the
-pinned Playwright's Chromium dependency list; review it when changing the pin.
+repository's `PressroomPlaywrightVersion` property. `latest` is an explicit opt-in
+that resolves the newest stable release from NuGet, and an explicit `<version>`
+selects a recorded one. These overrides apply during normal NuGet restore without
+generating or enforcing package lock files. The Dockerfile's apt package list
+follows the pinned Playwright's Chromium dependency list; review it when changing
+the pin.
 
 ## Manual package builds and GitHub releases
 
@@ -301,7 +300,7 @@ on its own. Only Client produces a NuGet package, named `AurorisNet.Pressroom.Cl
 containing both assemblies. The client tests run on both frameworks (install both runtimes).
 
 ```sh
-dotnet restore Pressroom.slnx --locked-mode
+dotnet restore Pressroom.slnx
 dotnet pack src/Pressroom.Client -c Release -o artifacts/nuget --no-restore
 ```
 
@@ -311,7 +310,7 @@ target, a README, icon, and MIT metadata. Its `.snupkg` contains portable PDBs f
 both assemblies and frameworks. Source Link points at the build commit; CI normalizes build paths.
 Package validation checks framework compatibility. After the first stable release,
 set `PackageValidationBaselineVersion` in `build/ClientPackage.props` to that
-published version and refresh the lock files. Subsequent releases must pass that
+published version and restore dependencies. Subsequent releases must pass that
 [API baseline](https://learn.microsoft.com/dotnet/fundamentals/apicompat/package-validation/baseline-version-validator).
 
 The Packages workflow always keeps the client package and symbols on GitHub and

@@ -1,6 +1,6 @@
 #requires -Version 7.0
 # Prints a concrete Microsoft.Playwright version. 'pinned' (the default) is the repository's
-# PressroomPlaywrightVersion, which the checked-in packages.lock.json files were restored with.
+# PressroomPlaywrightVersion property.
 # 'latest' asks NuGet for the newest stable release and must be requested explicitly.
 param([string]$Version = 'pinned')
 $ErrorActionPreference = 'Stop'

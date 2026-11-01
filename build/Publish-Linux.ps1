@@ -1,6 +1,6 @@
 #requires -Version 7.0
-# -PlaywrightVersion: 'pinned' (default) restores the checked-in lock files unchanged; 'latest' or an
-# explicit different version refreshes them inside this disposable build.
+# -PlaywrightVersion: 'pinned' (default) uses the repository's configured version;
+# 'latest' or an explicit version overrides it for this build.
 param([string]$Version = '1.1.0', [string]$OutputDirectory = '/out', [string]$PlaywrightVersion = 'pinned')
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsLinux()) { throw 'Run this helper on Linux x64.' }
@@ -11,12 +11,9 @@ $PlaywrightVersion = & (Join-Path $PSScriptRoot Resolve-PlaywrightVersion.ps1) -
 Write-Host "Selected Microsoft.Playwright $PlaywrightVersion and its matching browser."
 if ($PlaywrightVersion -ne $pinned) {
     $properties += "-p:PressroomPlaywrightVersion=$PlaywrightVersion"
-    # Refresh all transitive lock files together in the disposable container build.
-    dotnet restore Pressroom.slnx --force-evaluate @properties
-    if ($LASTEXITCODE -ne 0) { throw 'Playwright dependency refresh failed.' }
 }
-dotnet restore Pressroom.slnx --locked-mode @properties
-if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed.' }
+dotnet restore Pressroom.slnx @properties
+if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
 dotnet build Pressroom.slnx -c Release --no-restore @properties -p:ContinuousIntegrationBuild=true
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 # The net8.0 suite also runs in the dedicated package job.

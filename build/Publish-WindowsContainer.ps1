@@ -1,7 +1,6 @@
 #requires -Version 7.0
-# -PlaywrightVersion: 'pinned' (default) restores the checked-in lock files unchanged. 'latest' or an
-# explicit different version refreshes the lock files in this checkout; do not commit that refresh
-# unless the pinned version is being upgraded deliberately.
+# -PlaywrightVersion: 'pinned' (default) uses the repository's configured version;
+# 'latest' or an explicit version overrides it for this build.
 param([string]$Version = '1.1.0', [string]$PlaywrightVersion = 'pinned')
 $ErrorActionPreference = 'Stop'
 if (![OperatingSystem]::IsWindows()) { throw 'Run on Windows x64 with the .NET 10 SDK.' }
@@ -16,11 +15,9 @@ Push-Location $root
 try {
     if ($PlaywrightVersion -ne $pinned) {
         $properties += "-p:PressroomPlaywrightVersion=$PlaywrightVersion"
-        dotnet restore Pressroom.slnx --force-evaluate @properties
-        if ($LASTEXITCODE -ne 0) { throw 'Playwright dependency refresh failed.' }
     }
-    dotnet restore Pressroom.slnx --locked-mode @properties
-    if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed.' }
+    dotnet restore Pressroom.slnx @properties
+    if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
     dotnet build Pressroom.slnx -c Release --no-restore @properties -p:ContinuousIntegrationBuild=true
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
     dotnet test --solution Pressroom.slnx -f net10.0 -c Release --no-build --no-restore

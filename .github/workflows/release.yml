@@ -67,8 +67,8 @@ jobs:
           $existingTag = git tag --list "v$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository tags.' }
           if ($env:CREATE_RELEASE -eq 'true' -and $existingTag) { throw 'This version already has a tag. Choose a new release version.' }
-          # Both installers use the checked-in PressroomPlaywrightVersion and lock files, never a
-          # newer NuGet release, so one release carries one Chromium and rebuilds from the commit.
+          # Both installers use the checked-in PressroomPlaywrightVersion so one release
+          # carries the same Playwright version and matching Chromium on both platforms.
           $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version pinned
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
       - name: Validate NuGet publishing configuration
@@ -104,11 +104,15 @@ jobs:
             8.0.x
           cache: true
           cache-dependency-path: |
-            src/**/packages.lock.json
-            tests/**/packages.lock.json
+            src/**/*.csproj
+            tests/**/*.csproj
+            Directory.Build.props
+            build/ClientPackage.props
+            NuGet.Config
+            global.json
 
-      - name: Restore locked dependencies
-        run: dotnet restore Pressroom.slnx --locked-mode "-p:Version=$env:RELEASE_VERSION" -p:DisableImplicitNuGetFallbackFolder=true
+      - name: Restore dependencies
+        run: dotnet restore Pressroom.slnx "-p:Version=$env:RELEASE_VERSION" -p:DisableImplicitNuGetFallbackFolder=true
 
       - name: Build
         run: dotnet build Pressroom.slnx -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
@@ -165,7 +169,7 @@ jobs:
             8.0.x
       - name: Restore, build, and test both client targets
         run: |
-          dotnet restore tests/Pressroom.Contracts.Tests --locked-mode "-p:Version=$env:RELEASE_VERSION"
+          dotnet restore tests/Pressroom.Contracts.Tests "-p:Version=$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Client restore failed.' }
           dotnet build tests/Pressroom.Contracts.Tests -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
           if ($LASTEXITCODE -ne 0) { throw 'Client build failed.' }
@@ -211,8 +215,8 @@ jobs:
           sudo ip6tables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
       - name: Build and verify as an unprivileged user
         # The runtime smoke check uses the same outbound firewall as deployment.
-        # The builder itself needs network access to restore pinned dependencies.
-        # 'pinned' restores the checked-in lock files without a refresh, matching the Windows package.
+        # The builder itself needs network access to restore dependencies.
+        # 'pinned' selects the same configured Playwright version as the Windows package.
         run: |
           ./build/Build-Container.ps1 -Version $env:RELEASE_VERSION -Image "ghcr.io/auroris/pressroom:$env:RELEASE_VERSION" -PlaywrightVersion pinned -TestNetworkIsolation
           $manifest = Get-Content artifacts/container-publish/release-manifest.json -Raw | ConvertFrom-Json

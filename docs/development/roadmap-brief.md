@@ -19,8 +19,8 @@ handed to a Windows printer through SumatraPDF. `GET /v1/health` is anonymous;
 `GET /v1/info`, `GET /v1/printers`, and `GET /openapi/v1.json` follow the configured
 access mode. Full contract: `docs/api.md`.
 
-**Projects** (solution `Pressroom.slnx`, all `net10.0`, C# 14, nullable, lock files,
-`RestorePackagesWithLockFile=true`, `Deterministic=true`, `Version` 0.1.0 in
+**Projects** (solution `Pressroom.slnx`, all `net10.0`, C# 14, nullable,
+`Deterministic=true`, `Version` 0.1.0 in
 `Directory.Build.props` and overridden by `-p:Version` at release time):
 
 | Project | Role | Dependencies |
@@ -91,8 +91,9 @@ plus `.sha256`. The targets currently hard-fail unless `OS == Windows_NT` and
 4. **Metadata-only logs** and no deliberate retention of documents beyond what a
    feature explicitly documents (the async design below is the one place retention
    is introduced, and it is opt-in and documented).
-5. **Pinned and locked.** Playwright, Chromium, Node, and NuGet versions are pinned
-   and restored with `--locked-mode`. A release artefact must pass a real `--check`
+5. **Matched browser dependencies.** The selected Playwright package supplies its
+   matching Chromium and Node. NuGet restores from project references without lock
+   files. A release artefact must pass a real `--check`
    with the bundled browser before it is published.
 6. **Preserve Windows and IIS support.** Keep the IIS folder release, Visual Studio
    publish check, and Windows acceptance checks passing throughout the Linux and
@@ -128,14 +129,13 @@ plus `.sha256`. The targets currently hard-fail unless `OS == Windows_NT` and
 - Version the packages with the same `-p:Version` the release workflow passes.
   Pre-release suffixes map to NuGet pre-release versions.
 - Add a `publish-packages` job to `.github/workflows/release.yml` (or a separate
-  manual workflow `packages.yml`) that runs on `ubuntu-latest`: restore locked, build,
+  manual workflow `packages.yml`) that runs on `ubuntu-latest`: restore, build,
   test the contract and client tests, `dotnet pack` the two projects, and push to
   nuget.org. Prefer nuget.org **trusted publishing** (OIDC) if available for the
   account; otherwise a `NUGET_API_KEY` repository secret scoped to the two package
   IDs. Pushing happens only after the Windows release job has succeeded for the same
   version, so a package never references a version that has no server release.
-- Lock files: packing with locked restore must keep working; update
-  `packages.lock.json` for both target frameworks.
+- Restore and pack both target frameworks using the dependencies declared in the projects.
 
 **Documentation.** `docs/client.md` and `README.md` quick start switch from project
 references to `dotnet add package Pressroom.Client`. `docs/developing.md` gains a
@@ -248,7 +248,7 @@ folder releases. Builds on work item B.
 **Dockerfile (multi-stage).**
 
 1. **build** from `mcr.microsoft.com/dotnet/sdk:10.0`: copy sources, restore
-   `--locked-mode`, run unit and API tests (skip real-browser tests here or run them
+   dependencies, run unit and API tests (skip real-browser tests here or run them
    with the sandbox requirements satisfied in CI), publish `Pressroom.Server` for
    `linux-x64` framework-dependent with the Linux-capable publish helper, which
    installs the headless shell into `/app/browsers`, copies notices and docs, and

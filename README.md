@@ -141,7 +141,7 @@ the design history, lives in the repository's `docs/development` folder.
 ## Developing
 
 ```sh
-dotnet restore Pressroom.slnx --locked-mode
+dotnet restore Pressroom.slnx
 dotnet build Pressroom.slnx -c Release --no-restore
 dotnet test --solution Pressroom.slnx -c Release
 ```

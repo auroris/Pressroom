@@ -2,7 +2,7 @@
 
 Pressroom uses the following separately licensed components. This file is an
 index, not a replacement for their licenses. The exact resolved versions are in
-the committed `packages.lock.json` files and each published `release-manifest.json`.
+each restored project's `obj/project.assets.json` and each published `release-manifest.json`.
 
 | Component | Upstream and license information | Files retained in the release |
 |---|---|---|
@@ -28,6 +28,6 @@ of the initial source distribution. If a later qualified renderer requires an
 app-local redistributable, obtain it from Microsoft's permitted distribution,
 preserve its license/notice files, and add its version and hashes to the package.
 
-Development test dependencies are recorded in their own lock files and are not
+Development test dependencies are resolved in their own projects and are not
 published with the server. Pressroom's own source licensing is left to the owner;
 this notice does not grant a new license to the Pressroom application.
