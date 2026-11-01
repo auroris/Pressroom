@@ -1,8 +1,24 @@
 # AurorisNet.Pressroom.Client
 
-HTTP client for the Pressroom HTML-to-PDF service, for .NET 8 and .NET 10.
-Includes both the `Pressroom.Client` and `Pressroom.Contracts` assemblies and uses
-the framework's HTTP APIs to call a running server. No browser dependencies.
+Pressroom is a self-hosted HTML-to-PDF service for Windows, IIS, Linux, and
+containers. Send a complete HTML document to its HTTP API to receive a PDF or
+submit it to a configured Windows or Linux printer.
+
+**This package is the .NET client for Pressroom.** It lets .NET 8 and .NET 10
+applications call a running Pressroom server. It includes the `Pressroom.Client`
+and `Pressroom.Contracts` assemblies, with no browser dependencies. It does not
+include the server or render PDFs locally.
+
+**Looking for the server?** Visit the
+[Pressroom GitHub repository](https://github.com/auroris/Pressroom) for the full
+project and deployment guides, or
+[download a server release](https://github.com/auroris/Pressroom/releases/latest).
+The repository covers Windows/IIS, Linux, and container deployments. Set up a
+server before using this client; the
+[getting started guide](https://github.com/auroris/Pressroom/blob/main/docs/getting-started.md)
+walks through configuration and your first render.
+
+## Installation
 
 For versions published to NuGet.org:
 
@@ -16,6 +32,10 @@ from a release into a local feed directory. Add `--source ./packages` to the
 command above. A separate Contracts package is not needed. When migrating from
 the old packages, remove the `Pressroom.Client` and `Pressroom.Contracts` package
 references; the C# namespaces stay the same.
+
+## Usage
+
+Use your server's URL and API key in your application:
 
 ```csharp
 using Pressroom.Client;
